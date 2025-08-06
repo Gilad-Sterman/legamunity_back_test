@@ -1,0 +1,152 @@
+-- -- Legamunity Database Schema for Supabase
+-- -- Run this SQL in your Supabase SQL Editor to create the necessary tables
+
+-- -- Enable UUID extension
+-- CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- -- ==================== USERS TABLE ====================
+-- CREATE TABLE users (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--     name VARCHAR(255) NOT NULL,
+--     email VARCHAR(255) UNIQUE NOT NULL,
+--     role VARCHAR(50) NOT NULL DEFAULT 'admin',
+--     phone VARCHAR(20),
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- );
+
+-- -- ==================== SESSIONS TABLE ====================
+-- CREATE TABLE sessions (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--     client_name VARCHAR(255) NOT NULL,
+--     client_age INTEGER,
+--     client_email VARCHAR(255),
+--     client_phone VARCHAR(20),
+--     assigned_admin UUID REFERENCES users(id),
+--     status VARCHAR(50) NOT NULL DEFAULT 'active',
+--     preferences JSONB DEFAULT '{}',
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- );
+
+-- -- ==================== INTERVIEWS TABLE ====================
+-- CREATE TABLE interviews (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+--     type VARCHAR(50) NOT NULL, -- 'personal', 'career', 'relationships', 'life_events', 'wisdom'
+--     scheduled_date TIMESTAMP WITH TIME ZONE,
+--     completed_date TIMESTAMP WITH TIME ZONE,
+--     duration INTEGER DEFAULT 60, -- minutes
+--     location VARCHAR(100) DEFAULT 'online',
+--     status VARCHAR(50) NOT NULL DEFAULT 'scheduled', -- 'scheduled', 'in_progress', 'completed', 'cancelled'
+--     content JSONB DEFAULT '{}', -- Interview responses and data
+--     notes TEXT,
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- );
+
+-- -- ==================== DRAFTS TABLE ====================
+-- CREATE TABLE drafts (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+--     version INTEGER NOT NULL DEFAULT 1,
+--     stage VARCHAR(50) NOT NULL DEFAULT 'first_draft', -- 'first_draft', 'in_progress', 'pending_review', 'under_review', 'pending_approval', 'approved', 'rejected'
+--     content JSONB NOT NULL DEFAULT '{}',
+--     completion_percentage DECIMAL(5,2) DEFAULT 0.00,
+--     overall_rating DECIMAL(3,2), -- 1.0 to 5.0
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--     UNIQUE(session_id, version)
+-- );
+
+-- -- ==================== DRAFT HISTORY TABLE ====================
+-- CREATE TABLE draft_history (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--     draft_id UUID NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+--     action VARCHAR(50) NOT NULL, -- 'created', 'updated', 'stage_changed', 'approved', 'rejected'
+--     user_id UUID REFERENCES users(id),
+--     changes JSONB DEFAULT '{}',
+--     reason TEXT,
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- );
+
+-- -- ==================== INDEXES ====================
+-- CREATE INDEX idx_sessions_status ON sessions(status);
+-- CREATE INDEX idx_sessions_assigned_admin ON sessions(assigned_admin);
+-- CREATE INDEX idx_interviews_session_id ON interviews(session_id);
+-- CREATE INDEX idx_interviews_status ON interviews(status);
+-- CREATE INDEX idx_interviews_type ON interviews(type);
+-- CREATE INDEX idx_drafts_session_id ON drafts(session_id);
+-- CREATE INDEX idx_drafts_stage ON drafts(stage);
+-- CREATE INDEX idx_draft_history_draft_id ON draft_history(draft_id);
+-- CREATE INDEX idx_draft_history_action ON draft_history(action);
+
+-- -- ==================== ROW LEVEL SECURITY (RLS) ====================
+-- -- Enable RLS on all tables
+-- ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE interviews ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE drafts ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE draft_history ENABLE ROW LEVEL SECURITY;
+
+-- -- Create policies (for now, allow all operations - you can restrict later)
+-- CREATE POLICY "Allow all operations on users" ON users FOR ALL USING (true);
+-- CREATE POLICY "Allow all operations on sessions" ON sessions FOR ALL USING (true);
+-- CREATE POLICY "Allow all operations on interviews" ON interviews FOR ALL USING (true);
+-- CREATE POLICY "Allow all operations on drafts" ON drafts FOR ALL USING (true);
+-- CREATE POLICY "Allow all operations on draft_history" ON draft_history FOR ALL USING (true);
+
+-- -- ==================== SAMPLE DATA ====================
+-- -- Insert sample users
+-- INSERT INTO users (name, email, role, phone) VALUES
+-- ('Admin User', 'admin@legamunity.com', 'admin', '+1-555-0101'),
+-- ('Sarah Johnson', 'sarah@legamunity.com', 'admin', '+1-555-0102'),
+-- ('Michael Chen', 'michael@legamunity.com', 'admin', '+1-555-0103');
+
+-- -- Insert sample session
+-- INSERT INTO sessions (client_name, client_age, client_email, client_phone, assigned_admin, status) 
+-- SELECT 
+--     'Eleanor Thompson', 
+--     78, 
+--     'eleanor.thompson@email.com', 
+--     '+1-555-0201',
+--     u.id,
+--     'active'
+-- FROM users u WHERE u.email = 'admin@legamunity.com';
+
+-- -- Insert sample interviews
+-- INSERT INTO interviews (session_id, type, scheduled_date, status, duration, location)
+-- SELECT 
+--     s.id,
+--     'personal',
+--     NOW() + INTERVAL '1 day',
+--     'scheduled',
+--     90,
+--     'online'
+-- FROM sessions s WHERE s.client_name = 'Eleanor Thompson';
+
+-- INSERT INTO interviews (session_id, type, scheduled_date, status, duration, location)
+-- SELECT 
+--     s.id,
+--     'career',
+--     NOW() + INTERVAL '3 days',
+--     'scheduled',
+--     75,
+--     'online'
+-- FROM sessions s WHERE s.client_name = 'Eleanor Thompson';
+
+-- -- ==================== FUNCTIONS ====================
+-- -- Function to update updated_at timestamp
+-- CREATE OR REPLACE FUNCTION update_updated_at_column()
+-- RETURNS TRIGGER AS $$
+-- BEGIN
+--     NEW.updated_at = NOW();
+--     RETURN NEW;
+-- END;
+-- $$ language 'plpgsql';
+
+-- -- Create triggers for updated_at
+-- CREATE TRIGGER update_sessions_updated_at BEFORE UPDATE ON sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- CREATE TRIGGER update_interviews_updated_at BEFORE UPDATE ON interviews FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- CREATE TRIGGER update_drafts_updated_at BEFORE UPDATE ON drafts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

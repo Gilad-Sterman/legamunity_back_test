@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -41,9 +42,22 @@ app.use('/api/supabase-auth', supabaseAuthRoutes);
 // app.use('/api/users-migrated', usersMigratedRoutes);
 app.use('/api/sessions-supabase', sessionsSupabaseRoutes);
 
-// Root route
-app.get('/', (req, res) => {
+// API root route
+app.get('/api', (req, res) => {
   res.send('Legamunity API is running');
+});
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Serve React app for specific frontend routes
+// This avoids using problematic wildcard patterns that cause path-to-regexp errors
+const frontendRoutes = ['/', '/login', '/register', '/dashboard', '/admin', '/profile', '/settings'];
+
+frontendRoutes.forEach(route => {
+  app.get(route, (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
+  });
 });
 
 // Error handling middleware

@@ -5,7 +5,7 @@
 
 module.exports = {
   // JWT secret for token signing/verification
-  jwtSecret: process.env.JWT_SECRET || 'your-secret-jwt-key-for-development-only',
+  jwtSecret: process.env.JWT_SECRET,
   
   // Server port
   port: process.env.PORT || 5000,

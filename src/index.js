@@ -8,17 +8,14 @@ const path = require('path');
 // Load environment variables
 dotenv.config();
 
-// Import routes (to be created later)
-// const authRoutes = require('./routes/auth');
-// const userRoutes = require('./routes/users');
-// const sessionRoutes = require('./routes/sessions');
+
 const interviewRoutes = require('./routes/interviews');
-// const adminRoutes = require('./routes/admin');
 const testDraftsRoutes = require('./routes/test-drafts');
 const supabaseRoutes = require('./routes/supabaseRoutes');
 const supabaseAuthRoutes = require('./routes/supabaseAuth');
-// const usersMigratedRoutes = require('./routes/usersMigrated');
 const sessionsSupabaseRoutes = require('./routes/sessionsSupabase');
+const logsRoutes = require('./routes/logs');
+const { loggingMiddleware, errorLoggingMiddleware, requestLoggingMiddleware } = require('./middleware/loggingMiddleware');
 
 // Initialize express app
 const app = express();
@@ -27,20 +24,21 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(helmet()); // Security headers
 app.use(cors()); // Enable CORS
-app.use(morgan('dev')); // Logging
+app.use(morgan('dev')); // HTTP request logging
 app.use(express.json()); // Parse JSON bodies
 
+// Custom logging middleware
+app.use(loggingMiddleware); // Add logging helpers to requests
+// app.use(requestLoggingMiddleware); // Disabled - too much log noise
+
 // Routes
-// app.use('/api/auth', authRoutes);
-// app.use('/api/users', userRoutes);
-// app.use('/api/sessions', sessionRoutes);
+
 app.use('/api/interviews', interviewRoutes);
-// app.use('/api/admin', adminRoutes);
 app.use('/api/test-drafts', testDraftsRoutes);
 app.use('/api/supabase', supabaseRoutes);
 app.use('/api/supabase-auth', supabaseAuthRoutes);
-// app.use('/api/users-migrated', usersMigratedRoutes);
 app.use('/api/sessions-supabase', sessionsSupabaseRoutes);
+app.use('/api/logs', logsRoutes);
 
 // API root route
 app.get('/api', (req, res) => {
@@ -51,7 +49,6 @@ app.get('/api', (req, res) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Serve React app for specific frontend routes
-// This avoids using problematic wildcard patterns that cause path-to-regexp errors
 const frontendRoutes = ['/', '/login', '/register', '/dashboard', '/admin', '/profile', '/settings'];
 
 frontendRoutes.forEach(route => {
@@ -61,6 +58,7 @@ frontendRoutes.forEach(route => {
 });
 
 // Error handling middleware
+app.use(errorLoggingMiddleware); // Log errors to database
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({

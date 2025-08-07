@@ -1,4 +1,5 @@
 const supabaseAuthService = require('../services/supabaseAuthService');
+const loggingService = require('../services/loggingService');
 
 /**
  * Supabase Authentication Controller
@@ -107,10 +108,29 @@ class SupabaseAuthController {
       const result = await supabaseAuthService.loginUser(email, password);
 
       if (!result.success) {
+        // Log failed login attempt
+        try {
+          const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+          const userAgent = req.headers['user-agent'];
+          await loggingService.logFailedLogin(email, ipAddress, userAgent, result.error || 'Invalid credentials');
+        } catch (logError) {
+          console.error('Failed to log failed login:', logError);
+        }
+        
         return res.status(401).json({
           success: false,
           message: result.error || 'Invalid credentials'
         });
+      }
+
+      // Log successful login
+      try {
+        const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+        const userAgent = req.headers['user-agent'];
+        await loggingService.logLogin(result.user.id, result.user.email, ipAddress, userAgent);
+        console.log('Login logged successfully for user:', result.user.email);
+      } catch (logError) {
+        console.error('Failed to log successful login:', logError);
       }
 
       res.json({

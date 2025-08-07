@@ -1,4 +1,5 @@
 const supabaseService = require('../services/supabaseService');
+const loggingService = require('../services/loggingService');
 
 /**
  * Supabase Sessions Controller
@@ -137,6 +138,20 @@ const createSession = async (req, res) => {
       });
     }
 
+    // Log session creation
+    try {
+      console.log('Attempting to log session creation:', {
+        sessionId: result.data.id,
+        userId: req.user?.id,
+        userEmail: req.user?.email,
+        clientName: sessionData.client_name
+      });
+      await req.logSessionCreated(result.data.id, sessionData);
+      console.log('Session creation logged successfully');
+    } catch (logError) {
+      console.error('Failed to log session creation:', logError);
+    }
+
     res.status(201).json({
       success: true,
       data: result.data,
@@ -179,6 +194,9 @@ const updateSession = async (req, res) => {
         error: result.error
       });
     }
+
+    // Log session update
+    await req.logSessionUpdated(sessionId, sessionData);
 
     res.json({
       success: true,
@@ -308,6 +326,20 @@ const addInterviewToSession = async (req, res) => {
       });
     }
 
+    // Log interview creation
+    try {
+      console.log('Attempting to log interview creation:', {
+        sessionId,
+        interviewId: interviewData.id,
+        userId: req.user?.id,
+        userEmail: req.user?.email
+      });
+      await req.logInterviewCreated(sessionId, interviewData.id, interviewData);
+      console.log('Interview creation logged successfully');
+    } catch (logError) {
+      console.error('Failed to log interview creation:', logError);
+    }
+
     res.status(201).json({
       success: true,
       data: result.data,
@@ -331,6 +363,10 @@ const deleteSession = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Get session data before deletion for logging
+    const sessionResult = await supabaseService.getSessionById(id);
+    const sessionData = sessionResult.success ? sessionResult.data : null;
+
     const result = await supabaseService.deleteSession(id);
 
     if (!result.success) {
@@ -345,6 +381,11 @@ const deleteSession = async (req, res) => {
         message: 'Failed to delete session',
         error: result.error
       });
+    }
+
+    // Log session deletion
+    if (sessionData) {
+      await req.logSessionDeleted(id, sessionData);
     }
 
     res.json({
@@ -575,6 +616,14 @@ const uploadInterviewFile = async (req, res) => {
       });
     }
 
+    // Log file upload
+    await req.logFileUploaded(targetSessionId, interviewId, fileMetadata);
+    
+    // Log draft generation
+    if (generatedDraft) {
+      await req.logDraftGenerated(targetSessionId, interviewId, generatedDraft);
+    }
+
     res.json({
       success: true,
       data: {
@@ -628,6 +677,20 @@ const deleteInterview = async (req, res) => {
         message: 'Failed to delete interview',
         error: result.error
       });
+    }
+
+    // Log interview deletion
+    try {
+      console.log('Attempting to log interview deletion:', {
+        sessionId,
+        interviewId,
+        userId: req.user?.id,
+        userEmail: req.user?.email
+      });
+      await req.logInterviewDeleted(sessionId, interviewId);
+      console.log('Interview deletion logged successfully');
+    } catch (logError) {
+      console.error('Failed to log interview deletion:', logError);
     }
 
     res.json({

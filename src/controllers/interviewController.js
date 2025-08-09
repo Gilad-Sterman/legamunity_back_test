@@ -421,31 +421,46 @@ const uploadInterviewFile = async (req, res) => {
       });
     }
     
-    // Import shared mock data and AI service
-    const { mockSessions } = require('../data/mockData');
+    // Import services
     const aiService = require('../services/aiService');
+    const interviewService = require('../services/interviewService');
     
-    // Find interview in sessions
+    // First try to find interview in normalized table
     let foundInterview = null;
-    let foundSession = null;
-    let interviewIndex = -1;
+    let isNormalizedInterview = false;
     
-    for (const session of mockSessions) {
-      if (session.interviews) {
-        interviewIndex = session.interviews.findIndex(interview => interview.id === interviewId);
-        if (interviewIndex !== -1) {
-          foundInterview = session.interviews[interviewIndex];
-          foundSession = session;
-          break;
+    const normalizedResult = await interviewService.getInterviewById(interviewId);
+    if (normalizedResult.success && normalizedResult.data) {
+      foundInterview = normalizedResult.data;
+      isNormalizedInterview = true;
+      console.log('📁 Found interview in normalized table:', interviewId);
+    } else {
+      // Fall back to mock data for legacy interviews
+      const { mockSessions } = require('../data/mockData');
+      let foundSession = null;
+      let interviewIndex = -1;
+      
+      for (const session of mockSessions) {
+        if (session.interviews) {
+          interviewIndex = session.interviews.findIndex(interview => interview.id === interviewId);
+          if (interviewIndex !== -1) {
+            foundInterview = session.interviews[interviewIndex];
+            foundSession = session;
+            break;
+          }
         }
       }
-    }
-    
-    // If not found in sessions, check standalone mockInterviews
-    if (!foundInterview) {
-      interviewIndex = mockInterviews.findIndex(interview => interview.id === interviewId);
-      if (interviewIndex !== -1) {
-        foundInterview = mockInterviews[interviewIndex];
+      
+      // If not found in sessions, check standalone mockInterviews
+      if (!foundInterview) {
+        interviewIndex = mockInterviews.findIndex(interview => interview.id === interviewId);
+        if (interviewIndex !== -1) {
+          foundInterview = mockInterviews[interviewIndex];
+        }
+      }
+      
+      if (foundInterview) {
+        console.log('📁 Found interview in legacy data:', interviewId);
       }
     }
     
@@ -464,7 +479,7 @@ const uploadInterviewFile = async (req, res) => {
     });
     
     // Update interview with file information
-    const updatedInterview = {
+    let updatedInterview = {
       ...foundInterview,
       file_upload: {
         fileName: req.file.filename,
@@ -482,6 +497,29 @@ const uploadInterviewFile = async (req, res) => {
       fileSize: req.file.size,
       filePath: req.file.path
     });
+    
+    // Calculate file duration based on file type
+    const audioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac'];
+    const isAudioFile = audioTypes.includes(req.file.mimetype);
+    
+    let calculatedDuration;
+    if (isAudioFile) {
+      // For audio files, estimate duration based on file size and bitrate
+      const avgBitrate = 128; // kbps for typical audio
+      const fileSizeKB = req.file.size / 1024;
+      const estimatedDurationSeconds = (fileSizeKB * 8) / avgBitrate;
+      calculatedDuration = Math.max(1, Math.round(estimatedDurationSeconds / 60));
+      calculatedDuration = Math.min(calculatedDuration, 180); // Cap at 3 hours
+    } else {
+      // For text files, estimate reading duration (will be refined after processing)
+      calculatedDuration = Math.max(5, Math.round(req.file.size / 1000)); // Rough estimate
+      calculatedDuration = Math.min(calculatedDuration, 120); // Cap at 2 hours
+    }
+    
+
+    
+    // Update interview duration
+    updatedInterview.duration = calculatedDuration;
     
     // Process AI synchronously
     console.log('🤖 Starting synchronous AI processing for interview:', interviewId);
@@ -507,11 +545,37 @@ const uploadInterviewFile = async (req, res) => {
     }
     
     // Update interview in the appropriate location with final status
-    if (foundSession) {
-      foundSession.interviews[interviewIndex] = updatedInterview;
-      foundSession.updatedAt = new Date().toISOString();
+    if (isNormalizedInterview) {
+      // Update in normalized interviews table
+      const updateResult = await interviewService.updateInterview(interviewId, {
+        duration: updatedInterview.duration, // Update duration at top level
+        content: {
+          ...foundInterview.content,
+          file_upload: updatedInterview.file_upload,
+          transcription: updatedInterview.transcription,
+          ai_draft: updatedInterview.aiDraft
+        },
+        status: updatedInterview.status,
+        completed_date: updatedInterview.status === 'completed' ? updatedInterview.processedAt : null
+      });
+      
+      if (!updateResult.success) {
+        throw new Error('Failed to update normalized interview: ' + updateResult.error);
+      }
+      
+      // Get the updated interview for response
+      const finalResult = await interviewService.getInterviewById(interviewId);
+      if (finalResult.success) {
+        updatedInterview = finalResult.data;
+      }
     } else {
-      mockInterviews[interviewIndex] = updatedInterview;
+      // Update in legacy data
+      if (foundSession) {
+        foundSession.interviews[interviewIndex] = updatedInterview;
+        foundSession.updatedAt = new Date().toISOString();
+      } else {
+        mockInterviews[interviewIndex] = updatedInterview;
+      }
     }
     
     res.json({

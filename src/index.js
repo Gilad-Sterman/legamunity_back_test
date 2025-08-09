@@ -14,7 +14,9 @@ const testDraftsRoutes = require('./routes/test-drafts');
 const supabaseRoutes = require('./routes/supabaseRoutes');
 const supabaseAuthRoutes = require('./routes/supabaseAuth');
 const sessionsSupabaseRoutes = require('./routes/sessionsSupabase');
+// const adminRoutes = require('./routes/admin'); // Temporarily disabled due to missing controllers
 const logsRoutes = require('./routes/logs');
+const migrationRoutes = require('./routes/migration');
 const { loggingMiddleware, errorLoggingMiddleware, requestLoggingMiddleware } = require('./middleware/loggingMiddleware');
 
 // Initialize express app
@@ -38,7 +40,9 @@ app.use('/api/test-drafts', testDraftsRoutes);
 app.use('/api/supabase', supabaseRoutes);
 app.use('/api/supabase-auth', supabaseAuthRoutes);
 app.use('/api/sessions-supabase', sessionsSupabaseRoutes);
+// app.use('/api/admin', adminRoutes); // Temporarily disabled due to missing controllers
 app.use('/api/logs', logsRoutes);
+app.use('/api/migration', migrationRoutes);
 
 // API root route
 app.get('/api', (req, res) => {

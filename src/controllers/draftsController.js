@@ -594,3 +594,43 @@ exports.getDraftHistory = async (req, res) => {
     });
   }
 };
+
+/**
+ * @desc    Get all drafts for a specific session
+ * @route   GET /api/sessions-supabase/:id/drafts
+ * @access  Admin
+ */
+const getDraftsBySession = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params; // Note: using 'id' to match the route pattern /:id/drafts
+    
+    // Use the existing supabaseService to get drafts from the database
+    const supabaseService = require('../services/supabaseService');
+    const result = await supabaseService.getDraftsBySession(sessionId);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to fetch drafts'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      count: result.data.length,
+      message: `Found ${result.data.length} draft(s) for session ${sessionId}`
+    });
+
+  } catch (error) {
+    console.error('Error fetching drafts by session:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching drafts by session',
+      error: error.message
+    });
+  }
+};
+
+// Export the getDraftsBySession function
+exports.getDraftsBySession = getDraftsBySession;

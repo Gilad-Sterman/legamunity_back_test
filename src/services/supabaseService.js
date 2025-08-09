@@ -71,7 +71,11 @@ class SupabaseService {
             type,
             status,
             scheduled_date,
-            completed_date
+            completed_date,
+            duration,
+            location,
+            notes,
+            content
           )
         `);
 
@@ -86,7 +90,35 @@ class SupabaseService {
       const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
-      return { success: true, data };
+
+      // Calculate session metrics for each session
+      const sessionsWithMetrics = data.map(session => {
+        const interviews = session.interviews || [];
+        
+        // Calculate total duration
+        const totalDuration = interviews.reduce((sum, interview) => {
+          return sum + (interview.duration || 60); // Default 60 minutes if not set
+        }, 0);
+
+        // Calculate completion percentage
+        const completedInterviews = interviews.filter(interview => 
+          interview.status === 'completed'
+        ).length;
+        const totalInterviews = interviews.length;
+        const completionPercentage = totalInterviews > 0 
+          ? Math.round((completedInterviews / totalInterviews) * 100) 
+          : 0;
+
+        return {
+          ...session,
+          totalDuration,
+          completionPercentage,
+          completedInterviews,
+          totalInterviews
+        };
+      });
+
+      return { success: true, data: sessionsWithMetrics };
     } catch (error) {
       console.error('Error fetching sessions:', error);
       return { success: false, error: error.message };
@@ -132,7 +164,33 @@ class SupabaseService {
         .single();
 
       if (error) throw error;
-      return { success: true, data };
+
+      // Calculate session metrics
+      const interviews = data.interviews || [];
+      
+      // Calculate total duration
+      const totalDuration = interviews.reduce((sum, interview) => {
+        return sum + (interview.duration || 60); // Default 60 minutes if not set
+      }, 0);
+
+      // Calculate completion percentage
+      const completedInterviews = interviews.filter(interview => 
+        interview.status === 'completed'
+      ).length;
+      const totalInterviews = interviews.length;
+      const completionPercentage = totalInterviews > 0 
+        ? Math.round((completedInterviews / totalInterviews) * 100) 
+        : 0;
+
+      const sessionWithMetrics = {
+        ...data,
+        totalDuration,
+        completionPercentage,
+        completedInterviews,
+        totalInterviews
+      };
+
+      return { success: true, data: sessionWithMetrics };
     } catch (error) {
       console.error('Error fetching session:', error);
       return { success: false, error: error.message };
@@ -197,7 +255,25 @@ class SupabaseService {
    */
   async updateInterviewInSession(sessionId, interviewId, updateData) {
     try {
-      // First get the current session
+      // First, try to update the normalized interview in the separate interviews table
+      const { data: normalizedInterview, error: normalizedError } = await supabase
+        .from('interviews')
+        .update({
+          ...updateData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', interviewId)
+        .eq('session_id', sessionId)
+        .select()
+        .single();
+
+      // If normalized interview exists, return it
+      if (!normalizedError && normalizedInterview) {
+        return { success: true, data: normalizedInterview };
+      }
+
+      // If not found in normalized table, try legacy interviews in session preferences
+      
       const { data: session, error: fetchError } = await supabase
         .from('sessions')
         .select('preferences')
@@ -206,15 +282,15 @@ class SupabaseService {
 
       if (fetchError) throw fetchError;
 
-      // Find and update the interview
+      // Find and update the interview in legacy structure
       const interviews = session.preferences?.interviews || [];
       const interviewIndex = interviews.findIndex(interview => interview.id === interviewId);
       
       if (interviewIndex === -1) {
-        throw new Error('Interview not found');
+        throw new Error('Interview not found in either normalized table or legacy preferences');
       }
 
-      // Update the interview
+      // Update the interview in legacy structure
       const updatedInterviews = [...interviews];
       updatedInterviews[interviewIndex] = {
         ...updatedInterviews[interviewIndex],
@@ -267,6 +343,140 @@ class SupabaseService {
       return { success: true, data };
     } catch (error) {
       console.error('Error updating interview content:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update session scheduling and change all pending interviews to scheduled
+   */
+  async updateSessionScheduling(sessionId, schedulingData) {
+    try {
+      // First, update all pending interviews in the separate interviews table to "scheduled"
+      const { error: pendingStatusError } = await supabase
+        .from('interviews')
+        .update({
+          status: 'scheduled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('session_id', sessionId)
+        .eq('status', 'pending');
+
+      if (pendingStatusError) {
+        console.error('Error updating pending interview statuses:', pendingStatusError);
+        // Don't throw here, continue with other updates
+      }
+
+      // Second, update duration and location for all non-completed interviews
+      const updateData = {
+        updated_at: new Date().toISOString()
+      };
+      
+      if (schedulingData.duration) {
+        updateData.duration = schedulingData.duration;
+      }
+      
+      if (schedulingData.location) {
+        updateData.location = schedulingData.location;
+      }
+
+      const { error: durationLocationError } = await supabase
+        .from('interviews')
+        .update(updateData)
+        .eq('session_id', sessionId)
+        .neq('status', 'completed'); // Update all except completed interviews
+
+      if (durationLocationError) {
+        console.error('Error updating interview duration/location:', durationLocationError);
+        // Don't throw here, continue with session update
+      }
+
+      // Also update legacy interviews in session preferences if they exist
+      const { data: session, error: fetchError } = await supabase
+        .from('sessions')
+        .select('preferences')
+        .eq('id', sessionId)
+        .single();
+
+      if (!fetchError && session?.preferences?.interviews) {
+        const updatedInterviews = session.preferences.interviews.map(interview => {
+          const updatedInterview = {
+            ...interview,
+            status: interview.status === 'pending' ? 'scheduled' : interview.status,
+            updated_at: new Date().toISOString()
+          };
+
+          // Update duration and location for all non-completed interviews
+          if (interview.status !== 'completed') {
+            if (schedulingData.duration) {
+              updatedInterview.duration = schedulingData.duration;
+            }
+            if (schedulingData.location) {
+              updatedInterview.location = schedulingData.location;
+            }
+          }
+
+          return updatedInterview;
+        });
+
+        const updatedPreferences = {
+          ...session.preferences,
+          interview_scheduling: {
+            ...session.preferences.interview_scheduling,
+            ...schedulingData,
+            enabled: true,
+            updated_at: new Date().toISOString()
+          },
+          interviews: updatedInterviews
+        };
+
+        const { data, error } = await supabase
+          .from('sessions')
+          .update({
+            preferences: updatedPreferences,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', sessionId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return { success: true, data };
+      } else {
+        // No legacy interviews, just update session scheduling
+        const { data: currentSession, error: getCurrentError } = await supabase
+          .from('sessions')
+          .select('preferences')
+          .eq('id', sessionId)
+          .single();
+
+        if (getCurrentError) throw getCurrentError;
+
+        const updatedPreferences = {
+          ...currentSession.preferences,
+          interview_scheduling: {
+            ...currentSession.preferences?.interview_scheduling,
+            ...schedulingData,
+            enabled: true,
+            updated_at: new Date().toISOString()
+          }
+        };
+
+        const { data, error } = await supabase
+          .from('sessions')
+          .update({
+            preferences: updatedPreferences,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', sessionId)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return { success: true, data };
+      }
+    } catch (error) {
+      console.error('Error updating session scheduling:', error);
       return { success: false, error: error.message };
     }
   }

@@ -138,6 +138,65 @@ const createSession = async (req, res) => {
       });
     }
 
+    // Create default interviews in normalized interviews table
+    const interviewService = require('../services/interviewService');
+    const sessionId = result.data.id;
+    
+    try {
+      // Define default interviews based on session type
+      const defaultInterviews = [
+        {
+          type: 'life_story',
+          duration: 90,
+          location: 'online',
+          status: 'scheduled',
+          notes: 'Initial life story interview',
+          content: {
+            name: 'Life Story Interview',
+            isFriendInterview: false
+          }
+        },
+        {
+          type: 'family_history',
+          duration: 60,
+          location: 'online',
+          status: 'scheduled',
+          notes: 'Family history and background',
+          content: {
+            name: 'Family History Interview',
+            isFriendInterview: false
+          }
+        },
+        {
+          type: 'friend_verification',
+          duration: 45,
+          location: 'online',
+          status: 'scheduled',
+          notes: 'Friend verification interview',
+          content: {
+            name: 'Friend Verification Interview',
+            isFriendInterview: true
+          }
+        }
+      ];
+
+      // Create each default interview
+      const createdInterviews = [];
+      for (const interviewData of defaultInterviews) {
+        const interviewResult = await interviewService.createInterview(sessionId, interviewData);
+        if (interviewResult.success) {
+          createdInterviews.push(interviewResult.data);
+        } else {
+          console.error('Failed to create default interview:', interviewResult.error);
+        }
+      }
+
+      console.log(`Created ${createdInterviews.length} default interviews for session ${sessionId}`);
+    } catch (interviewError) {
+      console.error('Error creating default interviews:', interviewError);
+      // Don't fail the session creation if interview creation fails
+    }
+
     // Log session creation
     try {
       console.log('Attempting to log session creation:', {
@@ -229,36 +288,8 @@ const updateSessionScheduling = async (req, res) => {
       });
     }
 
-    // First get the current session to preserve existing preferences
-    const sessionResult = await supabaseService.getSessionById(id);
-    if (!sessionResult.success) {
-      return res.status(404).json({
-        success: false,
-        message: 'Session not found'
-      });
-    }
-
-    // Update the preferences with new scheduling details
-
-    const updatedPreferences = {
-      ...sessionResult.data.preferences,
-      interviews: sessionResult.data.preferences?.interviews.map(interview => ({
-        ...interview,
-        duration: interview.status === 'completed' ? interview.duration : scheduling_details.duration,
-        status: interview.status === 'pending' ? 'scheduled' : interview.status
-      })),
-      interview_scheduling: {
-        ...sessionResult.data.preferences?.interview_scheduling,
-        ...scheduling_details,
-        enabled: true
-      }
-    };
-
-    const updateData = {
-      preferences: updatedPreferences
-    };
-
-    const result = await supabaseService.updateSession(id, updateData);
+    // Use the new service method that handles both separate interviews table and legacy interviews
+    const result = await supabaseService.updateSessionScheduling(id, scheduling_details);
 
     if (!result.success) {
       if (result.error === 'Session not found') {
@@ -274,10 +305,27 @@ const updateSessionScheduling = async (req, res) => {
       });
     }
 
+    // Log the scheduling update
+    if (req.user) {
+      await loggingService.logEvent({
+        event_type: 'session_scheduling_updated',
+        user_id: req.user.id,
+        session_id: id,
+        details: {
+          scheduling_details,
+          message: 'Session scheduling updated and pending interviews changed to scheduled'
+        },
+        request_context: {
+          ip: req.ip,
+          user_agent: req.get('User-Agent')
+        }
+      });
+    }
+
     res.json({
       success: true,
       data: result.data,
-      message: 'Session scheduling updated successfully'
+      message: 'Session scheduling updated successfully and pending interviews changed to scheduled'
     });
 
   } catch (error) {
@@ -550,15 +598,17 @@ const uploadInterviewFile = async (req, res) => {
 
     // Step 2: Generate AI draft from processed content
     console.log('🤖 Generating AI draft from processed content...');
+    // Calculate actual file duration and word count
+    const calculatedDuration = isAudioFile ? _getFileDuration(file) : _getEstimatedReadingDuration(processedContent);
+    const calculatedWordCount = _getFileWordCount(isAudioFile ? transcription : processedContent);
+
     const interviewMetadata = {
       id: interviewId,
       name: `Interview ${interviewId}`,
       type: isAudioFile ? 'audio_interview' : 'text_interview',
       fileType: file.mimetype,
-      // TODO: Get duration from file
-      duration: isAudioFile ? _getFileDuration(file) : '',
-      // TODO: Get word count from file
-      wordCount: _getFileWordCount(transcription),
+      duration: calculatedDuration,
+      wordCount: calculatedWordCount,
     };
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
@@ -597,14 +647,16 @@ const uploadInterviewFile = async (req, res) => {
     const updateData = {
       ...targetInterview,
       status: 'completed',
-      duration: interviewMetadata.duration,
-      wordCount: interviewMetadata.wordCount,
+      duration: calculatedDuration, // Use the calculated duration directly
+      wordCount: calculatedWordCount, // Use the calculated word count directly
       file_upload: fileMetadata,
       transcription: transcription,
       ai_draft: generatedDraft,
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+
+
 
     const result = await supabaseService.updateInterviewInSession(targetSessionId, interviewId, updateData);
 
@@ -647,13 +699,36 @@ const uploadInterviewFile = async (req, res) => {
 };
 
 const _getFileDuration = (file) => {
-  const audioDuration = Math.random() * 60;
-  return audioDuration.toFixed(2);
+  // For audio files, simulate realistic duration calculation based on file size
+  // In a real implementation, this would use a library like ffprobe to get actual duration
+  const avgBitrate = 128; // kbps for typical audio
+  const fileSizeKB = file.size / 1024;
+  const estimatedDurationSeconds = (fileSizeKB * 8) / avgBitrate;
+  
+  // Convert to minutes and add some realistic variation
+  const durationMinutes = Math.max(1, Math.round(estimatedDurationSeconds / 60));
+  
+  // Cap at reasonable interview length (max 3 hours)
+  return Math.min(durationMinutes, 180);
 };
 
-const _getFileWordCount = (transcription) => {
-  const text = transcription;
-  return text.split(' ').length;
+const _getEstimatedReadingDuration = (text) => {
+  // Estimate reading duration for text content
+  // Average reading speed is about 200-250 words per minute
+  const wordsPerMinute = 225;
+  const wordCount = _getFileWordCount(text);
+  const estimatedMinutes = Math.max(1, Math.round(wordCount / wordsPerMinute));
+  
+  // Cap at reasonable reading time (max 2 hours)
+  return Math.min(estimatedMinutes, 120);
+};
+
+const _getFileWordCount = (text) => {
+  if (!text || typeof text !== 'string') return 0;
+  
+  // Clean the text and split by whitespace
+  const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+  return words.length;
 };
 
 // @desc    Delete interview from session

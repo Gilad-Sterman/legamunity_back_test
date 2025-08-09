@@ -129,4 +129,11 @@ router.post('/drafts/:id/export', draftsController.exportDraft);
  */
 router.get('/drafts/:id/history', draftsController.getDraftHistory);
 
+/**
+ * @route   GET /api/admin/sessions/:sessionId/drafts
+ * @desc    Get all drafts for a specific session
+ * @access  Admin
+ */
+router.get('/sessions/:sessionId/drafts', draftsController.getDraftsBySession);
+
 module.exports = router;

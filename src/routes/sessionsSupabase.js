@@ -107,4 +107,11 @@ router.delete('/:id', sessionController.deleteSession);
  */
 router.delete('/:id/interviews/:interviewId', sessionController.deleteInterview);
 
+/**
+ * @route GET /api/sessions-supabase/:id/drafts
+ * @desc Get all drafts for a specific session
+ * @access Admin only
+ */
+router.get('/:id/drafts', require('../controllers/draftsController').getDraftsBySession);
+
 module.exports = router;

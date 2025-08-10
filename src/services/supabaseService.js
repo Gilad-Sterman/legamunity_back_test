@@ -34,7 +34,7 @@ class SupabaseService {
           preferred_schedule: sessionData.preferred_schedule || {},
           story_preferences: sessionData.story_preferences || {},
           interview_scheduling: sessionData.interview_scheduling || {},
-          interviews: sessionData.interviews || [],
+          interviews: [], // Don't store interviews in preferences - use normalized interviews table instead
           metadata: sessionData.metadata || {},
           notes: sessionData.notes || '',
           friends: sessionData.friends || []
@@ -75,7 +75,8 @@ class SupabaseService {
             duration,
             location,
             notes,
-            content
+            content,
+            created_at
           )
         `);
 
@@ -91,9 +92,52 @@ class SupabaseService {
 
       if (error) throw error;
 
-      // Calculate session metrics for each session
+      // Fetch all drafts for these sessions
+      const sessionIds = data.map(session => session.id);
+      let draftsData = [];
+      
+      if (sessionIds.length > 0) {
+        const { data: drafts, error: draftsError } = await supabase
+          .from('drafts')
+          .select('*')
+          .in('session_id', sessionIds)
+          .order('version', { ascending: false });
+        
+        if (draftsError) {
+          console.warn('Warning: Could not fetch drafts:', draftsError.message);
+        } else {
+          draftsData = drafts || [];
+        }
+      }
+
+      // Calculate session metrics and associate drafts
       const sessionsWithMetrics = data.map(session => {
         const interviews = session.interviews || [];
+        
+        // Get drafts for this session
+        const sessionDrafts = draftsData.filter(draft => draft.session_id === session.id);
+        
+        // Sort interviews by creation time to maintain consistent order
+        const sortedInterviews = interviews.sort((a, b) => {
+          return new Date(a.created_at) - new Date(b.created_at);
+        });
+        
+        // Associate drafts with interviews using metadata
+        const interviewsWithDrafts = sortedInterviews.map(interview => {
+          const interviewDrafts = sessionDrafts.filter(draft => {
+            // Check if draft has sourceInterview in metadata
+            return draft.content?.metadata?.sourceInterview === interview.id;
+          });
+          
+          // Set ai_draft property for frontend compatibility
+          const latestDraft = interviewDrafts.length > 0 ? interviewDrafts[0] : null;
+          
+          return {
+            ...interview,
+            drafts: interviewDrafts,
+            ai_draft: latestDraft // Frontend expects this property to show "Draft Generated" button
+          };
+        });
         
         // Calculate total duration
         const totalDuration = interviews.reduce((sum, interview) => {
@@ -111,6 +155,8 @@ class SupabaseService {
 
         return {
           ...session,
+          interviews: interviewsWithDrafts,
+          drafts: sessionDrafts, // All drafts for the session
           totalDuration,
           completionPercentage,
           completedInterviews,
@@ -157,7 +203,10 @@ class SupabaseService {
         .from('sessions')
         .select(`
           *,
-          interviews (*),
+          interviews (
+            *,
+            created_at
+          ),
           drafts (*)
         `)
         .eq('id', sessionId)
@@ -167,6 +216,29 @@ class SupabaseService {
 
       // Calculate session metrics
       const interviews = data.interviews || [];
+      const drafts = data.drafts || [];
+      
+      // Sort interviews by creation time to maintain consistent order
+      const sortedInterviews = interviews.sort((a, b) => {
+        return new Date(a.created_at) - new Date(b.created_at);
+      });
+      
+      // Associate drafts with interviews using metadata
+      const interviewsWithDrafts = sortedInterviews.map(interview => {
+        const interviewDrafts = drafts.filter(draft => {
+          // Check if draft has sourceInterview in metadata
+          return draft.content?.metadata?.sourceInterview === interview.id;
+        });
+        
+        // Set ai_draft property for frontend compatibility
+        const latestDraft = interviewDrafts.length > 0 ? interviewDrafts[0] : null;
+        
+        return {
+          ...interview,
+          drafts: interviewDrafts,
+          ai_draft: latestDraft // Frontend expects this property to show "Draft Generated" button
+        };
+      });
       
       // Calculate total duration
       const totalDuration = interviews.reduce((sum, interview) => {
@@ -184,6 +256,8 @@ class SupabaseService {
 
       const sessionWithMetrics = {
         ...data,
+        interviews: interviewsWithDrafts, // Use interviews with draft associations
+        drafts, // All drafts for the session
         totalDuration,
         completionPercentage,
         completedInterviews,
@@ -200,50 +274,46 @@ class SupabaseService {
   // ==================== INTERVIEWS ====================
 
   /**
-   * Add interview to session's preferences.interviews array
+   * Add interview to normalized interviews table
    */
   async addInterviewToSession(sessionId, interviewData) {
     try {
-      // First get the current session
-      const { data: session, error: fetchError } = await supabase
+      // Verify session exists
+      const { data: session, error: sessionError } = await supabase
         .from('sessions')
-        .select('preferences')
+        .select('id')
         .eq('id', sessionId)
         .single();
 
-      if (fetchError) throw fetchError;
+      if (sessionError) throw new Error(`Session not found: ${sessionError.message}`);
 
-      // Create new interview object
+      // Create new interview object for normalized table
       const newInterview = {
-        id: `interview_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: interviewData.name || `Interview ${(session.preferences?.interviews?.length || 0) + 1}`,
+        session_id: sessionId,
         type: interviewData.type || 'life_story',
         status: interviewData.status || 'pending',
         duration: interviewData.duration || 90,
         location: interviewData.location || 'online',
-        isFriendInterview: interviewData.isFriendInterview || false,
         notes: interviewData.notes || '',
-        created_at: new Date().toISOString()
+        content: {
+          name: interviewData.name || `Interview ${Date.now()}`,
+          isFriendInterview: interviewData.is_friend_interview || interviewData.isFriendInterview || false
+        },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
-      // Update session preferences with new interview
-      const updatedPreferences = {
-        ...session.preferences,
-        interviews: [...(session.preferences?.interviews || []), newInterview]
-      };
-
-      const { data, error } = await supabase
-        .from('sessions')
-        .update({ 
-          preferences: updatedPreferences,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', sessionId)
+      // Insert into normalized interviews table
+      const { data: createdInterview, error } = await supabase
+        .from('interviews')
+        .insert(newInterview)
         .select()
         .single();
 
       if (error) throw error;
-      return { success: true, data: newInterview };
+
+      console.log('Created normalized interview:', createdInterview);
+      return { success: true, data: createdInterview };
     } catch (error) {
       console.error('Error adding interview to session:', error);
       return { success: false, error: error.message };
@@ -273,7 +343,6 @@ class SupabaseService {
       }
 
       // If not found in normalized table, try legacy interviews in session preferences
-      
       const { data: session, error: fetchError } = await supabase
         .from('sessions')
         .select('preferences')
@@ -486,49 +555,49 @@ class SupabaseService {
   /**
    * Create a new draft
    */
-  async createDraft(draftData) {
-    try {
-      const { data, error } = await supabase
-        .from('drafts')
-        .insert([{
-          session_id: draftData.sessionId,
-          version: draftData.version || 1,
-          stage: draftData.stage || 'first_draft',
-          content: draftData.content,
-          completion_percentage: draftData.completionPercentage || 0,
-          overall_rating: draftData.overallRating || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
+  // async createDraft(draftData) {
+  //   try {
+  //     const { data, error } = await supabase
+  //       .from('drafts')
+  //       .insert([{
+  //         session_id: draftData.sessionId,
+  //         version: draftData.version || 1,
+  //         stage: draftData.stage || 'first_draft',
+  //         content: draftData.content,
+  //         completion_percentage: draftData.completionPercentage || 0,
+  //         overall_rating: draftData.overallRating || null,
+  //         created_at: new Date().toISOString(),
+  //         updated_at: new Date().toISOString()
+  //       }])
+  //       .select()
+  //       .single();
 
-      if (error) throw error;
-      return { success: true, data };
-    } catch (error) {
-      console.error('Error creating draft:', error);
-      return { success: false, error: error.message };
-    }
-  }
+  //     if (error) throw error;
+  //     return { success: true, data };
+  //   } catch (error) {
+  //     console.error('Error creating draft:', error);
+  //     return { success: false, error: error.message };
+  //   }
+  // }
 
   /**
    * Get drafts for a session
    */
-  async getDraftsBySession(sessionId) {
-    try {
-      const { data, error } = await supabase
-        .from('drafts')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('version', { ascending: false });
+  // async getDraftsBySession(sessionId) {
+  //   try {
+  //     const { data, error } = await supabase
+  //       .from('drafts')
+  //       .select('*')
+  //       .eq('session_id', sessionId)
+  //       .order('version', { ascending: false });
 
-      if (error) throw error;
-      return { success: true, data };
-    } catch (error) {
-      console.error('Error fetching drafts:', error);
-      return { success: false, error: error.message };
-    }
-  }
+  //     if (error) throw error;
+  //     return { success: true, data };
+  //   } catch (error) {
+  //     console.error('Error fetching drafts:', error);
+  //     return { success: false, error: error.message };
+  //   }
+  // }
 
   // ==================== USERS ====================
 
@@ -590,29 +659,42 @@ class SupabaseService {
   }
 
   /**
-   * Delete an interview from a session by its ID
+   * Delete an interview from normalized interviews table
    */
   async deleteInterviewFromSession(interviewId, sessionId) {
     try {
-      // Find the session containing the interview
+      // First try to delete from normalized interviews table
+      const { data: deletedInterview, error: normalizedError } = await supabase
+        .from('interviews')
+        .delete()
+        .eq('id', interviewId)
+        .eq('session_id', sessionId)
+        .select()
+        .single();
+
+      // If found and deleted from normalized table, return success
+      if (!normalizedError && deletedInterview) {
+        console.log('Deleted normalized interview:', deletedInterview);
+        return { success: true, data: deletedInterview };
+      }
+
+      // If not found in normalized table, try legacy interviews in session preferences
       const { data: session, error: findError } = await supabase
         .from('sessions')
         .select('id, preferences')
         .eq('id', sessionId)
-        .limit(1)
         .single();
 
       if (findError) throw findError;
 
-      if (!session) {
-        return { success: false, error: 'Interview not found in any session' };
+      if (!session || !session.preferences?.interviews) {
+        return { success: false, error: 'Interview not found in either normalized table or legacy preferences' };
       }
 
       const originalInterviewCount = session.preferences.interviews.length;
       const updatedInterviews = session.preferences.interviews.filter(i => i.id !== interviewId);
 
       if (originalInterviewCount === updatedInterviews.length) {
-        // This case should ideally not be hit if the above filter worked, but as a safeguard:
         return { success: false, error: 'Interview ID did not match any interview in the session' };
       }
 
@@ -621,7 +703,7 @@ class SupabaseService {
         interviews: updatedInterviews,
       };
 
-      // Update the session with the interview removed
+      // Update the session with the interview removed from legacy structure
       const { data, error: updateError } = await supabase
         .from('sessions')
         .update({ 
@@ -634,7 +716,7 @@ class SupabaseService {
 
       if (updateError) throw updateError;
 
-      return { success: true, data };
+      return { success: true, data: { id: interviewId, deleted_from: 'legacy' } };
     } catch (error) {
       console.error('Error deleting interview from session:', error);
       return { success: false, error: error.message };
@@ -661,43 +743,479 @@ class SupabaseService {
 
       if (activeError) throw activeError;
 
-      // Get pending review count (status = 'pending_review')
-      const { count: pendingReview, error: pendingError } = await supabase
+      // Get completed sessions - sessions where ALL interviews are completed
+      const { data: allSessions, error: sessionsError } = await supabase
         .from('sessions')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending_review');
+        .select('id');
 
-      if (pendingError) throw pendingError;
+      if (sessionsError) throw sessionsError;
 
-      // Calculate average CQS (Content Quality Score) from all sessions
-      // This is a placeholder - in a real app, you'd calculate this from actual data
-      const { data: sessionsWithCqs, error: cqsError } = await supabase
-        .from('sessions')
-        .select('preferences')
-        .not('preferences->cqs_score', 'is', null);
+      let completedSessions = 0;
+      if (allSessions && allSessions.length > 0) {
+        for (const session of allSessions) {
+          // Get all interviews for this session
+          const { data: interviews, error: interviewsError } = await supabase
+            .from('interviews')
+            .select('status')
+            .eq('session_id', session.id);
 
-      if (cqsError) throw cqsError;
-
-      // Calculate average CQS if available
-      let averageCqs = 0;
-      if (sessionsWithCqs && sessionsWithCqs.length > 0) {
-        const totalCqs = sessionsWithCqs.reduce((sum, session) => {
-          return sum + (session.preferences.cqs_score || 0);
-        }, 0);
-        averageCqs = Math.round(totalCqs / sessionsWithCqs.length);
+          if (!interviewsError && interviews && interviews.length > 0) {
+            // Check if all interviews are completed
+            const allCompleted = interviews.every(interview => interview.status === 'completed');
+            if (allCompleted) {
+              completedSessions++;
+            }
+          }
+        }
       }
+
+      // Get drafts awaiting approval
+      const { count: draftsAwaitingApproval, error: draftsError } = await supabase
+        .from('drafts')
+        .select('*', { count: 'exact', head: true })
+        .eq('stage', 'pending_review');
+
+      if (draftsError) throw draftsError;
+
+      // Get total drafts count
+      const { count: totalDrafts, error: totalDraftsError } = await supabase
+        .from('drafts')
+        .select('*', { count: 'exact', head: true });
+
+      if (totalDraftsError) throw totalDraftsError;
+
+      // Get approved drafts count
+      const { count: approvedDrafts, error: approvedDraftsError } = await supabase
+        .from('drafts')
+        .select('*', { count: 'exact', head: true })
+        .eq('stage', 'approved');
+
+      if (approvedDraftsError) throw approvedDraftsError;
+
+      // Get rejected drafts count
+      const { count: rejectedDrafts, error: rejectedDraftsError } = await supabase
+        .from('drafts')
+        .select('*', { count: 'exact', head: true })
+        .eq('stage', 'rejected');
+
+      if (rejectedDraftsError) throw rejectedDraftsError;
+
+      // Get total interviews count
+      const { count: totalInterviews, error: totalInterviewsError } = await supabase
+        .from('interviews')
+        .select('*', { count: 'exact', head: true });
+
+      if (totalInterviewsError) throw totalInterviewsError;
+
+      // Get completed interviews count
+      const { count: completedInterviews, error: completedInterviewsError } = await supabase
+        .from('interviews')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'completed');
+
+      if (completedInterviewsError) throw completedInterviewsError;
+
+      // Calculate interview completion rate
+      const interviewCompletionRate = totalInterviews > 0 
+        ? Math.round((completedInterviews / totalInterviews) * 100)
+        : 0;
+
+      // Calculate draft approval rate
+      const draftApprovalRate = totalDrafts > 0 
+        ? Math.round((approvedDrafts / totalDrafts) * 100)
+        : 0;
+
+      // Get recent activity (last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { count: recentInterviews, error: recentInterviewsError } = await supabase
+        .from('interviews')
+        .select('*', { count: 'exact', head: true })
+        .gte('updated_at', sevenDaysAgo.toISOString());
+
+      if (recentInterviewsError) throw recentInterviewsError;
+
+      const { count: recentDrafts, error: recentDraftsError } = await supabase
+        .from('drafts')
+        .select('*', { count: 'exact', head: true })
+        .gte('updated_at', sevenDaysAgo.toISOString());
+
+      if (recentDraftsError) throw recentDraftsError;
 
       return {
         success: true,
         data: {
+          // Core session metrics
           totalSessions,
           activeSessions,
-          pendingReview,
-          averageCqs
+          completedSessions,
+          
+          // Draft metrics
+          totalDrafts,
+          draftsAwaitingApproval,
+          approvedDrafts,
+          rejectedDrafts,
+          draftApprovalRate,
+          
+          // Interview metrics
+          totalInterviews,
+          completedInterviews,
+          interviewCompletionRate,
+          
+          // Recent activity
+          recentInterviews,
+          recentDrafts,
+          
+          // Legacy metrics for backward compatibility
+          pendingReview: draftsAwaitingApproval,
+          averageCqs: draftApprovalRate // Use draft approval rate as quality metric
         }
       };
     } catch (error) {
       console.error('Error fetching session statistics:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // ==================== DRAFTS ====================
+
+  /**
+   * Create a new draft
+   */
+  async createDraft(draftData) {
+    try {
+      const draftRecord = {
+        session_id: draftData.session_id,
+        version: draftData.version || 1,
+        stage: draftData.stage || 'first_draft',
+        content: draftData.content || {}
+      };
+
+      const { data, error } = await supabase
+        .from('drafts')
+        .insert([draftRecord])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error creating draft:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get all drafts for a session with interview information
+   */
+  async getDraftsBySessionId(sessionId) {
+    try {
+      // First get the drafts
+      const { data: drafts, error: draftsError } = await supabase
+        .from('drafts')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('version', { ascending: false });
+
+      if (draftsError) throw draftsError;
+
+      // Get session with interviews to match draft data
+      const { data: session, error: sessionError } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      // Get interviews for this session separately
+      const { data: interviews, error: interviewsError } = await supabase
+        .from('interviews')
+        .select('*')
+        .eq('session_id', sessionId);
+
+      // Don't throw error if interviews don't exist, just use empty array
+      const sessionInterviews = interviews || [];
+
+      // Calculate draft statistics
+      const totalDrafts = drafts.length;
+      const approvedDrafts = drafts.filter(d => d.stage === 'approved').length;
+      const rejectedDrafts = drafts.filter(d => d.stage === 'rejected').length;
+      const pendingDrafts = totalDrafts - approvedDrafts - rejectedDrafts;
+
+      // Enhance drafts with interview information and proper completion calculation
+      const enhancedDrafts = drafts.map(draft => {
+        // Calculate actual completion percentage based on interviews
+        const completedInterviews = sessionInterviews.filter(i => i.status === 'completed').length || 0;
+        const totalInterviews = sessionInterviews.length || 1;
+        const actualCompletionPercentage = Math.round((completedInterviews / totalInterviews) * 100);
+
+        // Find corresponding interview for this draft (if any)
+        const correspondingInterview = sessionInterviews.find(i => 
+          i.ai_draft && i.ai_draft.title === draft.content?.title
+        ) || sessionInterviews[draft.version - 1];
+
+        // Get interview name with better fallback logic
+        let interviewName = 'Unknown Interview';
+        if (correspondingInterview) {
+          if (correspondingInterview.content && correspondingInterview.content.name) {
+            interviewName = correspondingInterview.content.name;
+          } else if (correspondingInterview.type) {
+            // Convert type to readable name
+            const typeNames = {
+              'personal': 'Personal Life Interview',
+              'career': 'Career & Work Interview', 
+              'relationships': 'Relationships Interview',
+              'life_events': 'Life Events Interview',
+              'wisdom': 'Wisdom & Reflections Interview',
+              'general': 'General Interview'
+            };
+            interviewName = typeNames[correspondingInterview.type] || `${correspondingInterview.type} Interview`;
+          }
+        } else {
+          interviewName = `Interview ${draft.version}`;
+        }
+
+        return {
+          ...draft,
+          completion_percentage: actualCompletionPercentage,
+          interview_name: interviewName,
+          interview_type: correspondingInterview?.type || 'general',
+          session_info: {
+            client_name: session.client_name,
+            total_interviews: totalInterviews,
+            completed_interviews: completedInterviews,
+            total_drafts: totalDrafts,
+            approved_drafts: approvedDrafts,
+            rejected_drafts: rejectedDrafts,
+            pending_drafts: pendingDrafts
+          }
+        };
+      });
+
+      return { success: true, data: enhancedDrafts };
+    } catch (error) {
+      console.error('Error fetching drafts by session:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get draft by ID
+   */
+  async getDraftById(draftId) {
+    try {
+      const { data, error } = await supabase
+        .from('drafts')
+        .select('*')
+        .eq('id', draftId)
+        .single();
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error fetching draft by ID:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update a draft
+   */
+  async updateDraft(draftId, updateData) {
+    try {
+      const updateRecord = {
+        ...updateData,
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('drafts')
+        .update(updateRecord)
+        .eq('id', draftId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error updating draft:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Delete a draft
+   */
+  async deleteDraft(draftId) {
+    try {
+      const { data, error } = await supabase
+        .from('drafts')
+        .delete()
+        .eq('id', draftId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error deleting draft:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get all drafts with filtering and pagination
+   */
+  async getAllDrafts(filters = {}) {
+    try {
+      let query = supabase
+        .from('drafts')
+        .select(`
+          *,
+          sessions!inner(
+            id,
+            client_name,
+            status
+          )
+        `);
+
+      // Apply filters
+      if (filters.stage) {
+        query = query.eq('stage', filters.stage);
+      }
+      if (filters.sessionId) {
+        query = query.eq('session_id', filters.sessionId);
+      }
+      if (filters.minCompletion) {
+        query = query.gte('completion_percentage', filters.minCompletion);
+      }
+
+      // Apply pagination
+      if (filters.limit) {
+        query = query.limit(filters.limit);
+      }
+      if (filters.offset) {
+        query = query.range(filters.offset, filters.offset + (filters.limit || 10) - 1);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error fetching all drafts:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // ==================== DRAFT NOTES ====================
+
+  /**
+   * Add a note to a draft (store in content.notes for now since notes column doesn't exist)
+   */
+  async addNoteToDraft(draftId, noteData) {
+    try {
+      // First, get the current draft to access existing content
+      const { data: currentDraft, error: fetchError } = await supabase
+        .from('drafts')
+        .select('content')
+        .eq('id', draftId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Create new note object
+      const newNote = {
+        id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        content: noteData.content,
+        author: noteData.author || 'Admin User',
+        createdAt: new Date().toISOString(),
+        draftId: draftId
+      };
+
+      // Add new note to existing notes array in content
+      const currentContent = currentDraft.content || {};
+      const existingNotes = currentContent.notes || [];
+      const updatedNotes = [...existingNotes, newNote];
+
+      // Update the draft with new notes in content
+      const updatedContent = {
+        ...currentContent,
+        notes: updatedNotes
+      };
+
+      const { data, error } = await supabase
+        .from('drafts')
+        .update({ 
+          content: updatedContent,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', draftId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data, note: newNote };
+    } catch (error) {
+      console.error('Error adding note to draft:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update draft stage (for approval/rejection)
+   */
+  async updateDraftStage(draftId, stageData) {
+    try {
+      // First get the current draft to preserve existing content
+      const { data: currentDraft, error: fetchError } = await supabase
+        .from('drafts')
+        .select('content')
+        .eq('id', draftId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Prepare the content with approval/rejection metadata
+      const updatedContent = { ...currentDraft.content };
+
+      // Add stage-specific metadata to content
+      if (stageData.stage === 'approved') {
+        updatedContent.approval_metadata = {
+          approved_by: stageData.approvedBy || 'Admin User',
+          approved_at: new Date().toISOString()
+        };
+        // Remove any rejection metadata if it exists
+        delete updatedContent.rejection_metadata;
+      } else if (stageData.stage === 'rejected') {
+        updatedContent.rejection_metadata = {
+          rejected_by: stageData.rejectedBy || 'Admin User',
+          rejected_at: new Date().toISOString(),
+          rejection_reason: stageData.rejectionReason || ''
+        };
+        // Remove any approval metadata if it exists
+        delete updatedContent.approval_metadata;
+      }
+
+      const updateRecord = {
+        stage: stageData.stage,
+        content: updatedContent,
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('drafts')
+        .update(updateRecord)
+        .eq('id', draftId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error updating draft stage:', error);
       return { success: false, error: error.message };
     }
   }

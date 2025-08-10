@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const interviewController = require('../controllers/interviewController');
+// const interviewController = require('../controllers/interviewController');
 const { verifyToken, requireAdmin } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
@@ -12,7 +12,7 @@ const interviewService = require('../services/interviewService');
  * @desc Get all interviews
  * @access Admin only
  */
-router.get('/', interviewController.getAllInterviews);
+// router.get('/', interviewController.getAllInterviews);
 
 /**
  * @route GET /api/interviews/session/:sessionId
@@ -152,42 +152,42 @@ router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
  * @desc Get interview by ID
  * @access Admin only
  */
-router.get('/:id', interviewController.getInterviewById);
+// router.get('/:id', interviewController.getInterviewById);
 
 /**
  * @route POST /api/interviews/:id/start
  * @desc Start an interview
  * @access Admin only
  */
-router.post('/:id/start', interviewController.startInterview);
+// router.post('/:id/start', interviewController.startInterview);
 
 /**
  * @route POST /api/interviews/:id/complete
  * @desc Complete an interview (triggers auto-draft creation)
  * @access Admin only
  */
-router.post('/:id/complete', interviewController.completeInterview);
+// router.post('/:id/complete', interviewController.completeInterview);
 
 /**
  * @route PUT /api/interviews/:id/content
  * @desc Update interview content during session
  * @access Admin only
  */
-router.put('/:id/content', interviewController.updateInterviewContent);
+// router.put('/:id/content', interviewController.updateInterviewContent);
 
 /**
  * @route PUT /api/interviews/:id
  * @desc Update interview details (name, notes, etc.)
  * @access Admin only
  */
-router.put('/:id', interviewController.updateInterview);
+// router.put('/:id', interviewController.updateInterview);
 
 /**
  * @route POST /api/interviews/:interviewId/upload
  * @desc Upload file for interview and process with AI
  * @access Admin only
  */
-router.post('/:interviewId/upload', verifyToken, requireAdmin, upload.single('file'), interviewController.uploadInterviewFile);
+// router.post('/:interviewId/upload', verifyToken, requireAdmin, upload.single('file'), interviewController.uploadInterviewFile);
 
 /**
  * @route POST /api/interviews/:id/question

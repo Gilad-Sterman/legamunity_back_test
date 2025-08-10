@@ -114,4 +114,18 @@ router.delete('/:id/interviews/:interviewId', sessionController.deleteInterview)
  */
 router.get('/:id/drafts', require('../controllers/draftsController').getDraftsBySession);
 
+/**
+ * @route POST /api/sessions-supabase/:id/drafts/:draftId/notes
+ * @desc Add note to a specific draft
+ * @access Admin only
+ */
+router.post('/:id/drafts/:draftId/notes', verifyToken, require('../controllers/draftsController').addNoteToDraft);
+
+/**
+ * @route PUT /api/sessions-supabase/:id/drafts/:draftId/stage
+ * @desc Update draft stage (approve/reject)
+ * @access Admin only
+ */
+router.put('/:id/drafts/:draftId/stage', verifyToken, require('../controllers/draftsController').updateDraftStage);
+
 module.exports = router;

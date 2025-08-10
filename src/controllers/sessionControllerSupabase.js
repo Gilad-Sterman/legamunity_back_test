@@ -138,62 +138,46 @@ const createSession = async (req, res) => {
       });
     }
 
-    // Create default interviews in normalized interviews table
+    // Create interviews from frontend data in normalized interviews table
     const interviewService = require('../services/interviewService');
     const sessionId = result.data.id;
     
     try {
-      // Define default interviews based on session type
-      const defaultInterviews = [
-        {
-          type: 'life_story',
-          duration: 90,
-          location: 'online',
-          status: 'scheduled',
-          notes: 'Initial life story interview',
-          content: {
-            name: 'Life Story Interview',
-            isFriendInterview: false
-          }
-        },
-        {
-          type: 'family_history',
-          duration: 60,
-          location: 'online',
-          status: 'scheduled',
-          notes: 'Family history and background',
-          content: {
-            name: 'Family History Interview',
-            isFriendInterview: false
-          }
-        },
-        {
-          type: 'friend_verification',
-          duration: 45,
-          location: 'online',
-          status: 'scheduled',
-          notes: 'Friend verification interview',
-          content: {
-            name: 'Friend Verification Interview',
-            isFriendInterview: true
+      // Use interviews from frontend sessionData if provided
+      const interviewsToCreate = sessionData.interviews || [];
+      
+      if (interviewsToCreate.length > 0) {
+        console.log(`Creating ${interviewsToCreate.length} interviews from frontend data for session ${sessionId}`);
+        
+        const createdInterviews = [];
+        for (const frontendInterview of interviewsToCreate) {
+          // Map frontend interview structure to backend structure
+          const interviewData = {
+            type: frontendInterview.type || 'life_story',
+            duration: frontendInterview.duration || 90,
+            location: 'online', // Default location
+            status: frontendInterview.status || 'pending',
+            notes: frontendInterview.notes || '',
+            content: {
+              name: frontendInterview.name || `Interview ${frontendInterview.id}`,
+              isFriendInterview: frontendInterview.type === 'friend_verification' || false
+            }
+          };
+          
+          const interviewResult = await interviewService.createInterview(sessionId, interviewData);
+          if (interviewResult.success) {
+            createdInterviews.push(interviewResult.data);
+          } else {
+            console.error('Failed to create interview:', interviewResult.error);
           }
         }
-      ];
 
-      // Create each default interview
-      const createdInterviews = [];
-      for (const interviewData of defaultInterviews) {
-        const interviewResult = await interviewService.createInterview(sessionId, interviewData);
-        if (interviewResult.success) {
-          createdInterviews.push(interviewResult.data);
-        } else {
-          console.error('Failed to create default interview:', interviewResult.error);
-        }
+        console.log(`Successfully created ${createdInterviews.length} interviews for session ${sessionId}`);
+      } else {
+        console.log(`No interviews provided in frontend data for session ${sessionId}`);
       }
-
-      console.log(`Created ${createdInterviews.length} default interviews for session ${sessionId}`);
     } catch (interviewError) {
-      console.error('Error creating default interviews:', interviewError);
+      console.error('Error creating interviews from frontend data:', interviewError);
       // Don't fail the session creation if interview creation fails
     }
 
@@ -490,25 +474,45 @@ const updateInterview = async (req, res) => {
     const { id: interviewId } = req.params;
     const updateData = req.body;
 
-    // We need to find which session contains this interview
-    // Since interviews are stored in session preferences, we need to search through sessions
-    const sessionsResult = await supabaseService.getSessions();
+    // First try to find the interview in the normalized interviews table
+    const supabase = require('../config/database');
+    const { data: interview, error: findError } = await supabase
+      .from('interviews')
+      .select('id, session_id')
+      .eq('id', interviewId)
+      .single();
 
-    if (!sessionsResult.success) {
+    if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows found
       return res.status(500).json({
         success: false,
-        message: 'Failed to fetch sessions to find interview',
-        error: sessionsResult.error
+        message: 'Database error while finding interview',
+        error: findError.message
       });
     }
 
-    // Find the session that contains this interview
     let targetSessionId = null;
-    for (const session of sessionsResult.data) {
-      const interviews = session.preferences?.interviews || [];
-      if (interviews.some(interview => interview.id === interviewId)) {
-        targetSessionId = session.id;
-        break;
+
+    if (interview) {
+      // Found in normalized table
+      targetSessionId = interview.session_id;
+    } else {
+      // Not found in normalized table, search legacy sessions
+      const sessionsResult = await supabaseService.getSessions();
+      if (!sessionsResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to fetch sessions to find interview',
+          error: sessionsResult.error
+        });
+      }
+
+      // Find the session that contains this interview in legacy structure
+      for (const session of sessionsResult.data) {
+        const interviews = session.preferences?.interviews || [];
+        if (interviews.some(interview => interview.id === interviewId)) {
+          targetSessionId = session.id;
+          break;
+        }
       }
     }
 
@@ -613,26 +617,48 @@ const uploadInterviewFile = async (req, res) => {
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
 
-    // Step 3: Find and update the interview
-    const sessionsResult = await supabaseService.getSessions();
-    if (!sessionsResult.success) {
+    // Step 3: Find the interview in normalized table
+    const supabase = require('../config/database');
+    const { data: interview, error: findError } = await supabase
+      .from('interviews')
+      .select('*')
+      .eq('id', interviewId)
+      .single();
+
+    if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows found
       return res.status(500).json({
         success: false,
-        message: 'Failed to fetch sessions to find interview'
+        message: 'Database error while finding interview',
+        error: findError.message
       });
     }
 
-    // Find the session that contains this interview
     let targetSessionId = null;
     let targetInterview = null;
 
-    for (const session of sessionsResult.data) {
-      const interviews = session.preferences?.interviews || [];
-      const foundInterview = interviews.find(interview => interview.id === interviewId);
-      if (foundInterview) {
-        targetSessionId = session.id;
-        targetInterview = foundInterview;
-        break;
+    if (interview) {
+      // Found in normalized table
+      targetSessionId = interview.session_id;
+      targetInterview = interview;
+    } else {
+      // Not found in normalized table, search legacy sessions
+      const sessionsResult = await supabaseService.getSessions();
+      if (!sessionsResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to fetch sessions to find interview'
+        });
+      }
+
+      // Find the session that contains this interview in legacy structure
+      for (const session of sessionsResult.data) {
+        const interviews = session.preferences?.interviews || [];
+        const foundInterview = interviews.find(interview => interview.id === interviewId);
+        if (foundInterview) {
+          targetSessionId = session.id;
+          targetInterview = foundInterview;
+          break;
+        }
       }
     }
 
@@ -643,20 +669,19 @@ const uploadInterviewFile = async (req, res) => {
       });
     }
 
-    // Step 4: Update interview with file, transcription, draft, and mark as completed
+    // Step 4: Update interview with file, transcription, and mark as completed
     const updateData = {
-      ...targetInterview,
       status: 'completed',
-      duration: calculatedDuration, // Use the calculated duration directly
-      wordCount: calculatedWordCount, // Use the calculated word count directly
-      file_upload: fileMetadata,
-      transcription: transcription,
-      ai_draft: generatedDraft,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      duration: calculatedDuration,
+      notes: targetInterview.notes || '',
+      content: {
+        ...targetInterview.content,
+        file_upload: fileMetadata,
+        transcription: transcription,
+        wordCount: calculatedWordCount
+      },
+      completed_date: new Date().toISOString()
     };
-
-
 
     const result = await supabaseService.updateInterviewInSession(targetSessionId, interviewId, updateData);
 
@@ -666,6 +691,61 @@ const uploadInterviewFile = async (req, res) => {
         message: 'Failed to update interview with file upload',
         error: result.error
       });
+    }
+
+    // Step 5: Create draft for this specific interview
+    const draftContent = {
+      summary: generatedDraft.summary || "This interview session captured valuable insights about the subject's life journey through file upload and AI processing.",
+      sections: generatedDraft.sections || {
+        introduction: "Based on the uploaded file, this section introduces the subject and provides context for their life story.",
+        earlyLife: "Early life experiences and memories captured from the interview content.",
+        careerJourney: "Professional journey and career milestones discussed in the interview.",
+        personalRelationships: "Personal relationships and family connections explored during the conversation.",
+        lifeWisdom: "Wisdom and life lessons shared during the interview session.",
+        conclusion: "Summary and reflection on the life story captured through this interview."
+      },
+      keyThemes: generatedDraft.keyThemes || [
+        "Personal Growth",
+        "Life Experiences", 
+        "Family and Heritage",
+        "Career Development",
+        "Wisdom and Reflection"
+      ],
+      metadata: {
+        wordCount: calculatedWordCount,
+        generatedAt: new Date().toISOString(),
+        sourceInterview: interviewId,
+        processingMethod: "AI_FILE_UPLOAD_GENERATION",
+        estimatedReadingTime: `${Math.ceil(calculatedWordCount / 250)} minutes`,
+        fileType: file.mimetype,
+        duration: calculatedDuration,
+        aiModel: generatedDraft.metadata?.ai_model || 'simulated'
+      }
+    };
+
+    // Create new draft for this interview (using session_id with interview reference in metadata)
+    // First check existing drafts to determine the next version number
+    const existingDraftsResult = await supabaseService.getDraftsBySessionId(targetSessionId);
+    let nextVersion = 1;
+    
+    if (existingDraftsResult.success && existingDraftsResult.data.length > 0) {
+      const latestDraft = existingDraftsResult.data[0]; // Already sorted by version desc
+      nextVersion = latestDraft.version + 1;
+    }
+
+    const draftData = {
+      session_id: targetSessionId,
+      version: nextVersion,
+      stage: 'first_draft',
+      content: draftContent
+    };
+    
+    const draftResult = await supabaseService.createDraft(draftData);
+
+    if (!draftResult.success) {
+      console.error('Failed to create draft:', draftResult.error);
+      // Don't fail the entire upload if draft creation fails
+      // The interview was already updated successfully
     }
 
     // Log file upload
@@ -682,10 +762,11 @@ const uploadInterviewFile = async (req, res) => {
         interview: result.data,
         fileMetadata,
         transcription: isAudioFile ? transcription : null,
-        draft: generatedDraft,
+        draft: draftResult.success ? draftResult.data : null,
+        draftCreated: draftResult.success,
         processingComplete: true
       },
-      message: `File uploaded and processed successfully. ${isAudioFile ? 'Audio transcribed, ' : ''}AI draft generated, interview marked as completed.`
+      message: `File uploaded and processed successfully. ${isAudioFile ? 'Audio transcribed, ' : ''}${draftResult.success ? 'Draft created in drafts table, ' : ''}interview marked as completed.`
     });
 
   } catch (error) {

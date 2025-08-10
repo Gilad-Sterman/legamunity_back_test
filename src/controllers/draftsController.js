@@ -606,7 +606,7 @@ const getDraftsBySession = async (req, res) => {
     
     // Use the existing supabaseService to get drafts from the database
     const supabaseService = require('../services/supabaseService');
-    const result = await supabaseService.getDraftsBySession(sessionId);
+    const result = await supabaseService.getDraftsBySessionId(sessionId);
 
     if (!result.success) {
       return res.status(400).json({
@@ -632,5 +632,117 @@ const getDraftsBySession = async (req, res) => {
   }
 };
 
-// Export the getDraftsBySession function
+/**
+ * @desc    Add note to draft
+ * @route   POST /api/sessions-supabase/:id/drafts/:draftId/notes
+ * @access  Admin
+ */
+const addNoteToDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const { content, author } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Note content is required'
+      });
+    }
+
+    const supabaseService = require('../services/supabaseService');
+    const result = await supabaseService.addNoteToDraft(draftId, {
+      content: content.trim(),
+      author: author || 'Admin User'
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to add note to draft'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      note: result.note,
+      message: 'Note added to draft successfully'
+    });
+
+  } catch (error) {
+    console.error('Error adding note to draft:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error adding note to draft',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Update draft stage (approve/reject)
+ * @route   PUT /api/sessions-supabase/:id/drafts/:draftId/stage
+ * @access  Admin
+ */
+const updateDraftStage = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const { stage, rejectionReason, approvedBy, rejectedBy } = req.body;
+
+    if (!stage) {
+      return res.status(400).json({
+        success: false,
+        message: 'Stage is required'
+      });
+    }
+
+    const validStages = ['approved', 'rejected', 'pending_review', 'under_review'];
+    if (!validStages.includes(stage)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid stage. Must be one of: ${validStages.join(', ')}`
+      });
+    }
+
+    if (stage === 'rejected' && !rejectionReason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rejection reason is required when rejecting a draft'
+      });
+    }
+
+    const supabaseService = require('../services/supabaseService');
+    const result = await supabaseService.updateDraftStage(draftId, {
+      stage,
+      rejectionReason,
+      approvedBy,
+      rejectedBy
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to update draft stage'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      message: `Draft ${stage} successfully`
+    });
+
+  } catch (error) {
+    console.error('Error updating draft stage:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating draft stage',
+      error: error.message
+    });
+  }
+};
+
+// Export the functions
 exports.getDraftsBySession = getDraftsBySession;
+exports.addNoteToDraft = addNoteToDraft;
+exports.updateDraftStage = updateDraftStage;

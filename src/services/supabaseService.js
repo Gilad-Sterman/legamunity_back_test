@@ -1,7 +1,36 @@
 const supabase = require('../config/database');
 
 class SupabaseService {
-  
+  constructor() {
+    this.supabase = supabase;
+  }
+
+  /**
+   * Retry Supabase operations with exponential backoff
+   * @param {Function} operation - The Supabase operation to retry
+   * @param {number} maxRetries - Maximum number of retries
+   * @param {number} baseDelay - Base delay in milliseconds
+   */
+  async retrySupabaseOperation(operation, maxRetries = 3, baseDelay = 1000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await operation();
+        return result;
+      } catch (error) {
+        console.log(` Supabase operation attempt ${attempt}/${maxRetries} failed:`, error.message);
+        
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        
+        // Exponential backoff
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.log(` Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
   // ==================== SESSIONS ====================
   
   /**
@@ -728,10 +757,14 @@ class SupabaseService {
    */
   async getSessionStats() {
     try {
-      // Get total sessions count
-      const { count: totalSessions, error: countError } = await supabase
-        .from('sessions')
-        .select('*', { count: 'exact', head: true });
+      console.log('🔍 Fetching session statistics...');
+      
+      // Get total sessions count with retry logic
+      const { count: totalSessions, error: countError } = await this.retrySupabaseOperation(
+        () => supabase
+          .from('sessions')
+          .select('*', { count: 'exact', head: true })
+      );
 
       if (countError) throw countError;
 

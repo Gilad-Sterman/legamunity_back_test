@@ -155,15 +155,43 @@ class SupabaseAuthService {
       // Verify our JWT token
       const decoded = jwt.verify(token, config.jwtSecret);
       
-      // Get fresh user data from database
-      const { data: userRecord, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', decoded.uid)
-        .single();
+      // Get fresh user data from database with retry logic
+      let userRecord, error;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          const result = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', decoded.uid)
+            .single();
+          
+          userRecord = result.data;
+          error = result.error;
+          break; // Success, exit retry loop
+        } catch (fetchError) {
+          retryCount++;
+          console.log(`🔄 User lookup attempt ${retryCount}/${maxRetries} failed:`, fetchError.message);
+          
+          if (retryCount === maxRetries) {
+            error = fetchError;
+            break;
+          }
+          
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
+      }
 
       if (error || !userRecord) {
-        throw new Error('User not found');
+        console.error('User lookup failed:', { 
+          uid: decoded.uid, 
+          error: error?.message, 
+          userRecord: !!userRecord 
+        });
+        throw new Error(`User not found: ${decoded.uid}`);
       }
 
       return {

@@ -15,4 +15,26 @@ module.exports = {
   
   // Token expiration (in seconds)
   tokenExpiration: 86400, // 24 hours
+  
+  // AI Service Configuration
+  ai: {
+    // n8n AI processing endpoint URL
+    endpointUrl: process.env.AI_ENDPOINT_URL || null,
+    
+    // n8n recordings endpoint URL (with sessionId template)
+    recordingsEndpointUrl: process.env.AI_RECORDINGS_ENDPOINT_URL || null,
+    
+    // API key for AI service authentication (if required)
+    apiKey: process.env.AI_API_KEY || null,
+    
+    // Enable/disable mock mode (when true, uses mock responses instead of real API)
+    mockMode: process.env.AI_MOCK_MODE === 'true' || !process.env.AI_ENDPOINT_URL,
+    
+    // Request timeout in milliseconds
+    requestTimeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 60000, // 60 seconds
+    
+    // Retry configuration
+    maxRetries: parseInt(process.env.AI_MAX_RETRIES) || 3,
+    retryDelay: parseInt(process.env.AI_RETRY_DELAY) || 2000, // 2 seconds
+  }
 };

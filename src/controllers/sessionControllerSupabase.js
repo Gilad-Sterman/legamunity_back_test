@@ -1,5 +1,6 @@
 const supabaseService = require('../services/supabaseService');
 const loggingService = require('../services/loggingService');
+const fullLifeStoriesService = require('../services/fullLifeStoriesService');
 
 /**
  * Supabase Sessions Controller
@@ -440,29 +441,39 @@ const deleteSession = async (req, res) => {
 // @access  Admin
 const getSessionStats = async (req, res) => {
   try {
-    const result = await supabaseService.getSessionStats();
-
-    if (!result.success) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch session statistics',
-        error: result.error
-      });
-    }
-
-    res.json({
-      success: true,
-      data: result.data,
-      message: 'Session statistics retrieved successfully'
-    });
-
+    const stats = await supabaseService.getSessionStats();
+    res.json(stats);
   } catch (error) {
-    console.error('Error in getSessionStats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching session statistics',
-      error: error.message
+    console.error('Error fetching session statistics:', {
+      message: error.message,
+      details: error.stack,
+      hint: error.hint || '',
+      code: error.code || ''
     });
+    
+    // Return default stats when network fails
+    const defaultStats = {
+      success: true,
+      data: {
+        totalSessions: 0,
+        activeSessions: 0,
+        completedSessions: 0,
+        completionRate: 0,
+        totalInterviews: 0,
+        completedInterviews: 0,
+        interviewCompletionRate: 0,
+        totalDrafts: 0,
+        approvedDrafts: 0,
+        draftApprovalRate: 0,
+        recentActivity: {
+          interviews: 0,
+          drafts: 0
+        }
+      },
+      message: 'Statistics temporarily unavailable due to connectivity issues'
+    };
+    
+    res.json(defaultStats);
   }
 };
 
@@ -865,6 +876,192 @@ const deleteInterview = async (req, res) => {
   }
 };
 
+// @desc    Generate full life story from all session data and approved drafts
+// @route   POST /api/admin/sessions/:id/generate-full-story
+// @access  Admin
+const generateFullLifeStory = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+
+    // Step 1: Get session with all interviews and drafts
+    const sessionResult = await supabaseService.getSessionById(sessionId);
+    if (!sessionResult.success) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
+    const session = sessionResult.data;
+    const interviews = session.interviews || [];
+
+    // Step 2: Check if session has approved drafts (STRICT CHECK)
+    const approvedDrafts = interviews.filter(interview => {
+      const draft = interview.ai_draft;
+      if (!draft) return false;
+      
+      // Only consider explicitly approved drafts
+      const stage = draft.metadata?.stage || draft.stage;
+      return stage === 'approved';
+    });
+
+    if (approvedDrafts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No approved drafts found for this session. Drafts must be explicitly approved to generate full life story.'
+      });
+    }
+
+    // Step 3: Generate full life story using AI service
+    const aiService = require('../services/aiService');
+    console.log('🤖 Generating full life story for session:', sessionId);
+    
+    const fullStoryData = {
+      sessionId,
+      clientInfo: {
+        name: session.client_name,
+        age: session.client_age,
+        preferences: session.preferences
+      },
+      approvedDrafts: approvedDrafts.map(interview => ({
+        interviewId: interview.id,
+        interviewName: interview.name,
+        draft: interview.ai_draft,
+        transcription: interview.content?.transcription,
+        notes: interview.notes,
+        duration: interview.duration
+      })),
+      sessionNotes: session.notes,
+      totalInterviews: interviews.length,
+      completedInterviews: interviews.filter(i => i.status === 'completed').length
+    };
+
+    const fullLifeStory = await aiService.generateFullLifeStory(fullStoryData);
+
+    // Step 4: Save to dedicated full_life_stories table
+    const fullLifeStoriesService = require('../services/fullLifeStoriesService');
+    
+    const storyData = {
+      sessionId,
+      title: fullLifeStory.title,
+      subtitle: fullLifeStory.subtitle,
+      content: fullLifeStory.content,
+      generatedBy: req.user?.email || 'admin',
+      userId: req.user?.id || null,
+      sourceMetadata: {
+        approvedDrafts: approvedDrafts.length,
+        totalInterviews: interviews.length,
+        completedInterviews: interviews.filter(i => i.status === 'completed').length,
+        generationDate: new Date().toISOString(),
+        approvedDraftIds: approvedDrafts.map(d => d.id),
+        sessionData: {
+          clientName: session.client_name,
+          clientAge: session.client_age,
+          sessionStatus: session.status
+        }
+      },
+      generationStats: {
+        processingTime: fullLifeStory.metadata?.processingTime || 0,
+        aiModel: fullLifeStory.metadata?.aiModel || 'mock-ai-v1.0',
+        sourceInterviews: approvedDrafts.length,
+        totalWords: fullLifeStory.content?.totalWords || 0,
+        estimatedPages: fullLifeStory.content?.estimatedPages || 0
+      },
+      totalWords: fullLifeStory.content?.totalWords || 0,
+      processingTime: fullLifeStory.metadata?.processingTime || 0,
+      aiModel: fullLifeStory.metadata?.aiModel || 'mock-ai-v1.0'
+    };
+
+    const saveResult = await fullLifeStoriesService.createFullLifeStory(storyData);
+    
+    if (!saveResult.success) {
+      console.error('Failed to save full life story to database:', saveResult.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to save generated full life story',
+        error: saveResult.error
+      });
+    }
+
+    // Step 5: Log the generation event
+    try {
+      await req.logEvent({
+        eventType: 'session',
+        eventAction: 'full_story_generated',
+        sessionId: sessionId,
+        resourceId: saveResult.data.id,
+        resourceType: 'full_life_story',
+        eventData: {
+          story_id: saveResult.data.id,
+          version: saveResult.data.version,
+          source_drafts: approvedDrafts.length,
+          total_words: fullLifeStory.content?.totalWords || 0,
+          processing_time: fullLifeStory.metadata?.processingTime || 0
+        },
+        severity: 'info'
+      });
+    } catch (logError) {
+      console.error('Failed to log full story generation:', logError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Full life story generated successfully',
+      data: {
+        story: saveResult.data,
+        session: session,
+        generationStats: {
+          totalWords: fullLifeStory.content?.totalWords || 0,
+          processingTime: fullLifeStory.metadata?.processingTime || 0,
+          sourceDrafts: approvedDrafts.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in generateFullLifeStory:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate full life story',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get all full life stories for a session (with version history)
+// @route   GET /api/sessions-supabase/:id/full-stories
+// @access  Admin
+const getSessionFullStories = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+
+    // Get all full life stories for this session, ordered by version (newest first)
+    const stories = await fullLifeStoriesService.getFullLifeStoriesBySession(sessionId);
+
+    if (!stories.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch full life stories',
+        error: stories.error
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: stories.data,
+      message: `Retrieved ${stories.data.length} full life stories`
+    });
+
+  } catch (error) {
+    console.error('Error in getSessionFullStories:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch session full life stories',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllSessions,
   getSessionById,
@@ -876,5 +1073,7 @@ module.exports = {
   getSessionStats,
   updateInterview,
   uploadInterviewFile,
-  deleteInterview
+  deleteInterview,
+  generateFullLifeStory,
+  getSessionFullStories
 };

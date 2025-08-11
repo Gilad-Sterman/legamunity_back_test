@@ -1,19 +1,140 @@
 /**
  * AI Service for transcription and summarization
- * This is a placeholder implementation for future AI integration
+ * Supports both mock mode and real n8n endpoint integration
  */
 
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+const config = require('../config/config');
+
 /**
- * Mock transcription service
- * In the future, this will integrate with speech-to-text APIs
- * @param {string} audioFilePath - Path to the audio file
- * @returns {Promise<string>} - Transcribed text
+ * Utility function to sleep for a given duration
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
  */
-const transcribeAudio = async (audioFilePath) => {
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry wrapper for API calls
+ * @param {Function} fn - Function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} delay - Delay between retries in ms
+ * @returns {Promise<any>} - Result of the function
+ */
+const withRetry = async (fn, maxRetries = config.ai.maxRetries, delay = config.ai.retryDelay) => {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.warn(`🔄 AI Service attempt ${attempt}/${maxRetries} failed:`, error.message);
+      
+      if (attempt < maxRetries) {
+        await sleep(delay * attempt); // Exponential backoff
+      }
+    }
+  }
+  
+  throw new Error(`AI Service failed after ${maxRetries} attempts. Last error: ${lastError.message}`);
+};
+
+/**
+ * Call the real n8n AI endpoint
+ * @param {Object} payload - Data to send to the AI endpoint
+ * @param {string} operation - Type of operation (transcribe, process, generate)
+ * @returns {Promise<Object>} - AI service response
+ */
+const callAIEndpoint = async (payload, operation) => {
+  if (!config.ai.endpointUrl) {
+    throw new Error('AI_ENDPOINT_URL not configured');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  // Add API key if configured
+  if (config.ai.apiKey) {
+    headers['Authorization'] = `Bearer ${config.ai.apiKey}`;
+    // Alternative header formats that n8n might use:
+    // headers['X-API-Key'] = config.ai.apiKey;
+    // headers['n8n-api-key'] = config.ai.apiKey;
+  }
+
+  const requestData = {
+    operation,
+    ...payload,
+    timestamp: new Date().toISOString(),
+  };
+
+  console.log(`🤖 Calling AI endpoint for ${operation}:`, config.ai.endpointUrl);
+
+  const response = await axios.post(config.ai.endpointUrl, requestData, {
+    headers,
+    timeout: config.ai.requestTimeout,
+  });
+
+  if (response.status !== 200) {
+    throw new Error(`AI endpoint returned status ${response.status}: ${response.statusText}`);
+  }
+
+  return response.data;
+};
+
+/**
+ * Upload file to AI endpoint for processing
+ * @param {string} filePath - Path to the file
+ * @param {string} operation - Type of operation
+ * @param {Object} metadata - Additional metadata
+ * @returns {Promise<Object>} - AI service response
+ */
+const uploadFileToAI = async (filePath, operation, metadata = {}) => {
+  if (!config.ai.endpointUrl) {
+    throw new Error('AI_ENDPOINT_URL not configured');
+  }
+
+  const formData = new FormData();
+  formData.append('file', fs.createReadStream(filePath));
+  formData.append('operation', operation);
+  formData.append('metadata', JSON.stringify(metadata));
+  formData.append('timestamp', new Date().toISOString());
+
+  const headers = {
+    ...formData.getHeaders(),
+  };
+
+  // Add API key if configured
+  if (config.ai.apiKey) {
+    headers['Authorization'] = `Bearer ${config.ai.apiKey}`;
+  }
+
+  console.log(`🤖 Uploading file to AI endpoint for ${operation}:`, filePath);
+
+  const response = await axios.post(config.ai.endpointUrl, formData, {
+    headers,
+    timeout: config.ai.requestTimeout,
+  });
+
+  if (response.status !== 200) {
+    throw new Error(`AI endpoint returned status ${response.status}: ${response.statusText}`);
+  }
+
+  return response.data;
+};
+
+/**
+ * Mock transcription service (fallback when endpoint is not available)
+ * @param {string} audioFilePath - Path to the audio file
+ * @returns {Promise<string>} - Mock transcribed text
+ */
+const mockTranscribeAudio = async (audioFilePath) => {
   console.log('🎤 [MOCK] Transcribing audio file:', audioFilePath);
   
   // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  await sleep(2000);
   
   // Mock transcription result
   const mockTranscription = `
@@ -34,32 +155,73 @@ This transcription would be much longer and contain the actual spoken content fr
 };
 
 /**
- * Mock text processing service
- * @param {string} textContent - Raw text content
- * @returns {Promise<string>} - Processed text
+ * Transcription service - supports both mock and real endpoint
+ * @param {string} audioFilePath - Path to the audio file
+ * @returns {Promise<string>} - Transcribed text
  */
-const processText = async (textContent) => {
+const transcribeAudio = async (audioFilePath) => {
+  if (config.ai.mockMode) {
+    return mockTranscribeAudio(audioFilePath);
+  }
+
+  return withRetry(async () => {
+    const result = await uploadFileToAI(audioFilePath, 'transcribe', {
+      fileType: 'audio',
+      language: 'auto-detect', // or specific language code
+    });
+    
+    console.log('✅ Real AI transcription completed');
+    return result.transcription || result.text || result.content;
+  });
+};
+
+/**
+ * Mock text processing service (fallback when endpoint is not available)
+ * @param {string} textContent - Raw text content
+ * @returns {Promise<string>} - Mock processed text
+ */
+const mockProcessText = async (textContent) => {
   console.log('📝 [MOCK] Processing text content');
   
   // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await sleep(1000);
   
   console.log('✅ [MOCK] Text processing completed');
   return textContent;
 };
 
 /**
- * Mock AI summarization service
- * In the future, this will integrate with AI APIs for content summarization
+ * Text processing service - supports both mock and real endpoint
+ * @param {string} textContent - Raw text content
+ * @returns {Promise<string>} - Processed text
+ */
+const processText = async (textContent) => {
+  if (config.ai.mockMode) {
+    return mockProcessText(textContent);
+  }
+
+  return withRetry(async () => {
+    const result = await callAIEndpoint({
+      content: textContent,
+      contentType: 'text',
+    }, 'process');
+    
+    console.log('✅ Real AI text processing completed');
+    return result.processedContent || result.content || textContent;
+  });
+};
+
+/**
+ * Mock AI summarization service (fallback when endpoint is not available)
  * @param {string} content - Text content to summarize
  * @param {Object} interviewMetadata - Interview metadata for context
- * @returns {Promise<Object>} - Generated draft content
+ * @returns {Promise<Object>} - Mock generated draft content
  */
-const generateDraft = async (content, interviewMetadata) => {
+const mockGenerateDraft = async (content, interviewMetadata) => {
   console.log('🤖 [MOCK] Generating AI draft for interview:', interviewMetadata.id);
   
   // Simulate AI processing time
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  await sleep(3000);
   
   // Mock draft generation
   const mockDraft = {
@@ -108,6 +270,55 @@ const generateDraft = async (content, interviewMetadata) => {
 };
 
 /**
+ * AI draft generation service - supports both mock and real endpoint
+ * @param {string} content - Text content to summarize
+ * @param {Object} interviewMetadata - Interview metadata for context
+ * @returns {Promise<Object>} - Generated draft content
+ */
+const generateDraft = async (content, interviewMetadata) => {
+  if (config.ai.mockMode) {
+    return mockGenerateDraft(content, interviewMetadata);
+  }
+
+  return withRetry(async () => {
+    const result = await callAIEndpoint({
+      content,
+      interviewMetadata,
+      operation: 'generate_life_story_draft',
+      language: 'auto-detect', // or specific language preference
+      style: 'narrative', // narrative, biographical, conversational
+      length: 'medium', // short, medium, long
+    }, 'generate');
+    
+    console.log('✅ Real AI draft generation completed');
+    
+    // Normalize the response format to match expected structure
+    const normalizedDraft = {
+      title: result.title || `Life Story Draft - ${interviewMetadata.name || 'Interview'} ${new Date().toLocaleDateString()}`,
+      content: {
+        summary: result.summary || result.content?.summary || 'AI-generated summary',
+        sections: result.sections || result.content?.sections || {},
+        keyThemes: result.keyThemes || result.content?.keyThemes || [],
+        metadata: {
+          wordCount: result.wordCount || result.content?.metadata?.wordCount || 0,
+          estimatedReadingTime: result.estimatedReadingTime || result.content?.metadata?.estimatedReadingTime || '0 minutes',
+          generatedAt: new Date().toISOString(),
+          sourceInterview: interviewMetadata.id,
+          processingMethod: 'AI_REAL_GENERATION',
+          aiModel: result.model || 'unknown',
+          confidence: result.confidence || null
+        }
+      },
+      status: result.status || 'draft',
+      version: result.version || '1.0',
+      createdAt: new Date().toISOString()
+    };
+    
+    return normalizedDraft;
+  });
+};
+
+/**
  * Main processing function that handles the complete workflow
  * @param {string} filePath - Path to uploaded file
  * @param {Object} interviewData - Interview metadata
@@ -115,6 +326,7 @@ const generateDraft = async (content, interviewMetadata) => {
  */
 const processInterviewFile = async (filePath, interviewData) => {
   console.log('🚀 Starting interview file processing workflow');
+  const startTime = Date.now();
   
   try {
     let textContent = '';
@@ -127,7 +339,8 @@ const processInterviewFile = async (filePath, interviewData) => {
     } else if (['txt', 'md', 'pdf', 'doc', 'docx'].includes(fileExtension)) {
       console.log('📄 Text file detected, processing...');
       // In a real implementation, we'd read and parse the file content
-      textContent = await processText('Mock text content from uploaded file');
+      const fileContent = config.ai.mockMode ? 'Mock text content from uploaded file' : fs.readFileSync(filePath, 'utf8');
+      textContent = await processText(fileContent);
     } else {
       throw new Error(`Unsupported file type: ${fileExtension}`);
     }
@@ -136,12 +349,19 @@ const processInterviewFile = async (filePath, interviewData) => {
     console.log('🤖 Generating AI draft...');
     const draft = await generateDraft(textContent, interviewData);
     
+    const processingTime = Date.now() - startTime;
+    
     return {
       success: true,
       transcription: textContent,
       draft: draft,
-      processingTime: '6 seconds (mock)',
-      message: 'Interview file processed successfully'
+      processingTime: `${processingTime}ms`,
+      message: 'Interview file processed successfully',
+      metadata: {
+        fileType: fileExtension,
+        processingMode: config.ai.mockMode ? 'mock' : 'real',
+        endpointUsed: config.ai.mockMode ? null : config.ai.endpointUrl
+      }
     };
     
   } catch (error) {
@@ -150,9 +370,286 @@ const processInterviewFile = async (filePath, interviewData) => {
   }
 };
 
+/**
+ * Health check function to test AI service connectivity
+ * @returns {Promise<Object>} - Health status
+ */
+const healthCheck = async () => {
+  const status = {
+    service: 'AI Service',
+    status: 'unknown',
+    mode: config.ai.mockMode ? 'mock' : 'real',
+    endpoint: config.ai.endpointUrl,
+    timestamp: new Date().toISOString()
+  };
+
+  if (config.ai.mockMode) {
+    status.status = 'healthy';
+    status.message = 'Running in mock mode';
+    return status;
+  }
+
+  try {
+    // Test endpoint connectivity
+    const testResult = await callAIEndpoint({
+      test: true,
+      message: 'Health check ping'
+    }, 'health');
+    
+    status.status = 'healthy';
+    status.message = 'Real endpoint is accessible';
+    status.responseTime = testResult.responseTime || 'unknown';
+  } catch (error) {
+    status.status = 'unhealthy';
+    status.message = error.message;
+    status.error = error.name;
+  }
+
+  return status;
+};
+
+/**
+ * Get current AI service configuration
+ * @returns {Object} - Configuration details
+ */
+const getConfig = () => {
+  return {
+    mockMode: config.ai.mockMode,
+    endpointConfigured: !!config.ai.endpointUrl,
+    endpointUrl: config.ai.endpointUrl ? config.ai.endpointUrl.replace(/\/+$/, '') : null, // Remove trailing slashes
+    hasApiKey: !!config.ai.apiKey,
+    requestTimeout: config.ai.requestTimeout,
+    maxRetries: config.ai.maxRetries,
+    retryDelay: config.ai.retryDelay
+  };
+};
+
+/**
+ * Update AI service configuration at runtime (for testing purposes)
+ * @param {Object} newConfig - New configuration values
+ * @returns {Object} - Updated configuration
+ */
+const updateConfig = (newConfig) => {
+  if (newConfig.endpointUrl !== undefined) {
+    config.ai.endpointUrl = newConfig.endpointUrl;
+  }
+  if (newConfig.apiKey !== undefined) {
+    config.ai.apiKey = newConfig.apiKey;
+  }
+  if (newConfig.mockMode !== undefined) {
+    config.ai.mockMode = newConfig.mockMode;
+  }
+  if (newConfig.requestTimeout !== undefined) {
+    config.ai.requestTimeout = newConfig.requestTimeout;
+  }
+  
+  console.log('🔧 AI Service configuration updated:', getConfig());
+  return getConfig();
+};
+
+/**
+ * Generate a comprehensive full life story from all approved drafts and session data
+ * @param {Object} fullStoryData - Complete session data with approved drafts
+ * @returns {Promise<Object>} - Generated full life story
+ */
+const generateFullLifeStory = async (fullStoryData) => {
+  console.log('🤖 AI Service: Generating full life story...');
+  const startTime = Date.now();
+
+  if (config.ai.mockMode) {
+    return mockGenerateFullLifeStory(fullStoryData);
+  }
+
+  try {
+    const payload = {
+      operation: 'generate_full_story',
+      sessionId: fullStoryData.sessionId,
+      clientInfo: fullStoryData.clientInfo,
+      approvedDrafts: fullStoryData.approvedDrafts,
+      sessionNotes: fullStoryData.sessionNotes,
+      totalInterviews: fullStoryData.totalInterviews,
+      completedInterviews: fullStoryData.completedInterviews,
+      generatedAt: new Date().toISOString()
+    };
+
+    const result = await withRetry(() => callAIEndpoint(payload, 'generate_full_story'));
+    
+    const processingTime = Date.now() - startTime;
+    console.log(`✅ AI Service: Full life story generated in ${processingTime}ms`);
+    
+    return {
+      ...result,
+      metadata: {
+        ...result.metadata,
+        processingTime,
+        generatedAt: new Date().toISOString()
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ AI Service: Full life story generation failed:', error);
+    console.log('🔄 Falling back to mock generation...');
+    return mockGenerateFullLifeStory(fullStoryData);
+  }
+};
+
+/**
+ * Mock implementation for full life story generation
+ * @param {Object} fullStoryData - Complete session data with approved drafts
+ * @returns {Object} - Mock generated full life story
+ */
+const mockGenerateFullLifeStory = (fullStoryData) => {
+  console.log('🎭 Mock AI: Generating full life story for session:', fullStoryData.sessionId);
+  
+  const { clientInfo, approvedDrafts, sessionNotes, totalInterviews, completedInterviews } = fullStoryData;
+  
+  // Simulate processing time
+  const processingTime = Math.floor(Math.random() * 3000) + 2000; // 2-5 seconds
+  
+  // Aggregate content from all approved drafts
+  const allSections = [];
+  const allThemes = [];
+  const allTranscriptions = [];
+  let totalWords = 0;
+  
+  approvedDrafts.forEach((draft, index) => {
+    const draftContent = draft.draft?.content || {};
+    
+    // Collect sections
+    if (draftContent.sections) {
+      Object.entries(draftContent.sections).forEach(([key, value]) => {
+        allSections.push({
+          source: `Interview ${index + 1} (${draft.interviewName})`,
+          section: key,
+          content: value
+        });
+      });
+    }
+    
+    // Collect themes
+    if (draftContent.keyThemes) {
+      allThemes.push(...draftContent.keyThemes.map(theme => ({
+        theme,
+        source: draft.interviewName
+      })));
+    }
+    
+    // Collect transcriptions
+    if (draft.transcription) {
+      allTranscriptions.push({
+        source: draft.interviewName,
+        content: draft.transcription,
+        duration: draft.duration
+      });
+    }
+    
+    // Count words
+    if (draftContent.summary) {
+      totalWords += draftContent.summary.split(' ').length;
+    }
+  });
+  
+  // Generate comprehensive life story
+  const fullLifeStory = {
+    title: `The Life Story of ${clientInfo.name}`,
+    subtitle: `A Comprehensive Journey Through ${completedInterviews} Life Interviews`,
+    
+    content: {
+      introduction: {
+        overview: `This comprehensive life story of ${clientInfo.name} has been carefully crafted from ${approvedDrafts.length} approved interview drafts, representing ${completedInterviews} completed interviews out of ${totalInterviews} total sessions. Through these conversations, we have captured the essence of a remarkable life journey spanning ${clientInfo.age} years.`,
+        methodology: `Each interview was professionally conducted, transcribed, and analyzed using advanced AI technology to extract key themes, memorable moments, and significant life events. The approved drafts have been synthesized into this cohesive narrative that honors ${clientInfo.name}'s unique story.`,
+        acknowledgments: `Special thanks to all who participated in the interview process and contributed to preserving these precious memories.`
+      },
+      
+      chapters: [
+        {
+          title: "Early Life and Foundation",
+          content: allSections.filter(s => s.section.includes('early') || s.section.includes('childhood') || s.section.includes('family')).map(s => s.content).join('\n\n') || `${clientInfo.name}'s early years were marked by formative experiences that would shape the person they became. Through our interviews, we discovered the foundational moments that established their character and values.`,
+          sources: allSections.filter(s => s.section.includes('early') || s.section.includes('childhood')).map(s => s.source)
+        },
+        {
+          title: "Career and Professional Journey",
+          content: allSections.filter(s => s.section.includes('career') || s.section.includes('work') || s.section.includes('professional')).map(s => s.content).join('\n\n') || `The professional life of ${clientInfo.name} reflects dedication, growth, and significant contributions to their field. Their career journey demonstrates resilience and adaptability through changing times.`,
+          sources: allSections.filter(s => s.section.includes('career') || s.section.includes('work')).map(s => s.source)
+        },
+        {
+          title: "Relationships and Family",
+          content: allSections.filter(s => s.section.includes('relationship') || s.section.includes('family') || s.section.includes('marriage')).map(s => s.content).join('\n\n') || `The relationships that ${clientInfo.name} built throughout their life form the heart of their story. From family bonds to friendships, these connections provided meaning and joy.`,
+          sources: allSections.filter(s => s.section.includes('relationship') || s.section.includes('family')).map(s => s.source)
+        },
+        {
+          title: "Life Lessons and Wisdom",
+          content: allSections.filter(s => s.section.includes('wisdom') || s.section.includes('lesson') || s.section.includes('advice')).map(s => s.content).join('\n\n') || `Through decades of experience, ${clientInfo.name} has accumulated profound wisdom and insights. These life lessons offer guidance and inspiration for future generations.`,
+          sources: allSections.filter(s => s.section.includes('wisdom') || s.section.includes('lesson')).map(s => s.source)
+        },
+        {
+          title: "Legacy and Reflections",
+          content: `As we conclude this comprehensive life story, we reflect on the remarkable legacy of ${clientInfo.name}. Their journey through ${clientInfo.age} years has been marked by resilience, love, achievement, and wisdom. This story will serve as a lasting tribute to a life well-lived and memories well-preserved.`,
+          sources: approvedDrafts.map(d => d.interviewName)
+        }
+      ],
+      
+      appendices: {
+        interviewSummary: {
+          totalInterviews,
+          completedInterviews,
+          approvedDrafts: approvedDrafts.length,
+          totalDuration: approvedDrafts.reduce((sum, d) => sum + (d.duration || 0), 0),
+          interviewDetails: approvedDrafts.map(d => ({
+            name: d.interviewName,
+            duration: d.duration,
+            hasTranscription: !!d.transcription,
+            hasDraft: !!d.draft
+          }))
+        },
+        keyThemes: [...new Set(allThemes.map(t => t.theme))].slice(0, 10),
+        sessionNotes: sessionNotes || 'No additional session notes provided.'
+      },
+      
+      totalWords: totalWords + 2000, // Add estimated words from generated content
+      estimatedPages: Math.ceil((totalWords + 2000) / 250),
+      generationSummary: `This life story was generated from ${approvedDrafts.length} approved interview drafts, combining AI analysis with human curation to create a comprehensive narrative of ${clientInfo.name}'s remarkable life journey.`
+    },
+    
+    metadata: {
+      generatedAt: new Date().toISOString(),
+      processingTime,
+      aiModel: 'mock-ai-v1.0',
+      sourceInterviews: approvedDrafts.length,
+      totalInterviews,
+      completedInterviews,
+      clientAge: clientInfo.age,
+      language: clientInfo.preferences?.preferred_language || 'en',
+      version: '1.0.0'
+    }
+  };
+  
+  console.log(`✅ Mock AI: Generated full life story with ${fullLifeStory.content.totalWords} words in ${processingTime}ms`);
+  
+  return fullLifeStory;
+};
+
 module.exports = {
+  // Core AI functions
   transcribeAudio,
   processText,
   generateDraft,
-  processInterviewFile
+  generateFullLifeStory,
+  processInterviewFile,
+  
+  // Utility functions
+  healthCheck,
+  getConfig,
+  updateConfig,
+  
+  // Internal functions (for testing)
+  _internal: {
+    callAIEndpoint,
+    uploadFileToAI,
+    withRetry,
+    mockTranscribeAudio,
+    mockProcessText,
+    mockGenerateDraft,
+    mockGenerateFullLifeStory
+  }
 };

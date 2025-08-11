@@ -94,6 +94,20 @@ const upload = multer({
 router.post('/interviews/:id/upload', upload.single('file'), sessionController.uploadInterviewFile);
 
 /**
+ * @route POST /api/admin/sessions/:id/generate-full-story
+ * @desc Generate full life story from all session data and approved drafts
+ * @access Admin only
+ */
+router.post('/:id/generate-full-story', sessionController.generateFullLifeStory);
+
+/**
+ * @route GET /api/admin/sessions/:id/full-stories
+ * @desc Get all full life stories for a session (with version history)
+ * @access Admin only
+ */
+router.get('/:id/full-stories', sessionController.getSessionFullStories);
+
+/**
  * @route DELETE /api/admin/sessions/:id
  * @desc Delete session
  * @access Admin only

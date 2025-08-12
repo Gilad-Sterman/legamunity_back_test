@@ -876,6 +876,91 @@ class SupabaseService {
 
       if (recentDraftsError) throw recentDraftsError;
 
+      // ==================== LIFE STORY STATISTICS ====================
+      
+      // Initialize life story stats with defaults
+      let totalLifeStories = 0;
+      let generatedLifeStories = 0;
+      let approvedLifeStories = 0;
+      let rejectedLifeStories = 0;
+      let totalStoryWords = 0;
+      let avgWordsPerStory = 0;
+
+      try {
+        // Get total life stories count
+        const { count: totalCount, error: totalLifeStoriesError } = await supabase
+          .from('full_life_stories')
+          .select('*', { count: 'exact', head: true });
+
+        if (!totalLifeStoriesError && totalCount !== null) {
+          totalLifeStories = totalCount;
+        }
+
+        // Get generated life stories count (status = 'generated')
+        const { count: generatedCount, error: generatedLifeStoriesError } = await supabase
+          .from('full_life_stories')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'generated');
+
+        if (!generatedLifeStoriesError && generatedCount !== null) {
+          generatedLifeStories = generatedCount;
+        }
+
+        // Get approved life stories count (status = 'approved')
+        const { count: approvedCount, error: approvedLifeStoriesError } = await supabase
+          .from('full_life_stories')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'approved');
+
+        if (!approvedLifeStoriesError && approvedCount !== null) {
+          approvedLifeStories = approvedCount;
+        }
+
+        // Get rejected life stories count (check review_notes for rejection)
+        const { data: allLifeStories, error: allLifeStoriesError } = await supabase
+          .from('full_life_stories')
+          .select('review_notes')
+          .eq('status', 'generated'); // Rejections are stored as 'generated' with review_notes
+
+        if (!allLifeStoriesError && allLifeStories && allLifeStories.length > 0) {
+          rejectedLifeStories = allLifeStories.filter(story => {
+            if (!story.review_notes) return false;
+            
+            // Ensure review_notes is an array
+            const reviewNotes = Array.isArray(story.review_notes) ? story.review_notes : [];
+            if (reviewNotes.length === 0) return false;
+            
+            // Check if any review note contains rejection info
+            return reviewNotes.some(note => 
+              note && (
+                note.action === 'rejected' || 
+                (note.content && typeof note.content === 'string' && note.content.toLowerCase().includes('reject'))
+              )
+            );
+          }).length;
+        }
+
+        // Get life stories with word counts for average calculation
+        const { data: lifeStoriesWithContent, error: lifeStoriesContentError } = await supabase
+          .from('full_life_stories')
+          .select('content');
+
+        if (!lifeStoriesContentError && lifeStoriesWithContent && lifeStoriesWithContent.length > 0) {
+          const validStories = lifeStoriesWithContent.filter(story => 
+            story.content && story.content.word_count && typeof story.content.word_count === 'number'
+          );
+          
+          if (validStories.length > 0) {
+            totalStoryWords = validStories.reduce((sum, story) => sum + story.content.word_count, 0);
+            avgWordsPerStory = Math.round(totalStoryWords / validStories.length);
+          }
+        }
+
+      } catch (lifeStoryError) {
+        console.warn('⚠️ Error fetching life story statistics, using defaults:', lifeStoryError.message);
+        // Keep default values (already initialized above)
+      }
+
       return {
         success: true,
         data: {
@@ -895,6 +980,14 @@ class SupabaseService {
           totalInterviews,
           completedInterviews,
           interviewCompletionRate,
+          
+          // Life story metrics
+          totalLifeStories: totalLifeStories || 0,
+          generatedLifeStories: generatedLifeStories || 0,
+          approvedLifeStories: approvedLifeStories || 0,
+          rejectedLifeStories,
+          avgWordsPerStory,
+          totalStoryWords,
           
           // Recent activity
           recentInterviews,

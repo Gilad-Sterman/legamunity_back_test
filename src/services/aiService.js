@@ -281,32 +281,216 @@ const generateDraft = async (content, interviewMetadata) => {
   }
 
   return withRetry(async () => {
-    const result = await callAIEndpoint({
-      content,
-      interviewMetadata,
-      operation: 'generate_life_story_draft',
-      language: 'auto-detect', // or specific language preference
-      style: 'narrative', // narrative, biographical, conversational
-      length: 'medium', // short, medium, long
-    }, 'generate');
+    console.log('🚀 Calling real AI draft generator endpoint...');
     
-    console.log('✅ Real AI draft generation completed');
+    // Use the specific AI_DRAFT_GENERETOR_ENDPOINT_URL for draft generation
+    const draftEndpointUrl = process.env.AI_DRAFT_GENERETOR_ENDPOINT_URL;
+    
+    if (!draftEndpointUrl) {
+      throw new Error('AI_DRAFT_GENERETOR_ENDPOINT_URL is not configured');
+    }
+
+    const payload = {
+      text: content,
+      interviewMetadata: {
+        id: interviewMetadata.id,
+        type: interviewMetadata.type || 'life_story',
+        clientName: interviewMetadata.name || interviewMetadata.clientName,
+        sessionId: interviewMetadata.sessionId,
+        duration: interviewMetadata.duration,
+        location: interviewMetadata.location,
+        notes: interviewMetadata.notes
+      },
+      preferences: {
+        language: 'auto-detect',
+        style: 'narrative',
+        length: 'medium'
+      }
+    };
+
+    const response = await axios.post(draftEndpointUrl, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.AI_API_KEY && { 'Authorization': `Bearer ${process.env.AI_API_KEY}` })
+      },
+      timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 60000
+    });
+
+    const result = response.data;
+    console.log('✅ Real AI draft generation completed successfully');
+    
+    // Extract the actual AI content from various possible fields
+    let aiGeneratedContent = '';
+    
+    if (result.output) {
+      // Handle output field with markdown code blocks
+      let outputContent = result.output;
+      
+      // Remove markdown code blocks if present
+      if (outputContent.includes('```json') && outputContent.includes('```')) {
+        const jsonMatch = outputContent.match(/```json\n([\s\S]*?)\n```/);
+        if (jsonMatch) {
+          try {
+            const parsedOutput = JSON.parse(jsonMatch[1]);
+            aiGeneratedContent = parsedOutput.summary_markdown || parsedOutput.content || parsedOutput.summary || '';
+            console.log('🔍 EXTRACTED FROM OUTPUT JSON:', aiGeneratedContent.substring(0, 200) + '...');
+          } catch (e) {
+            console.log('🔍 FAILED TO PARSE OUTPUT JSON, USING RAW OUTPUT');
+            aiGeneratedContent = outputContent;
+          }
+        } else {
+          aiGeneratedContent = outputContent;
+        }
+      } else {
+        aiGeneratedContent = outputContent;
+      }
+    } else {
+      // Fallback to other fields
+      aiGeneratedContent = result.message?.content || result.content || '';
+    }    
+    // Try to parse the AI content as JSON if it looks like structured data
+    let parsedContent = null;
+    try {
+      if (aiGeneratedContent.startsWith('{') || aiGeneratedContent.startsWith('[')) {
+        parsedContent = JSON.parse(aiGeneratedContent);
+        console.log('🔍 PARSED AI CONTENT AS JSON:', JSON.stringify(parsedContent, null, 2));
+      }
+    } catch (e) {
+      console.log('🔍 AI CONTENT IS NOT JSON, TREATING AS TEXT');
+    }
+    
+    // Extract sections from the structured content
+    let extractedSections = {};
+    let extractedKeywords = [];
+    let extractedSummary = '';
+    
+    // Handle both actual newlines and escaped newlines for all content processing
+    const normalizedContent = aiGeneratedContent ? aiGeneratedContent.replace(/\\n/g, '\n') : '';
+    
+    if (parsedContent) {
+      // Use the structured content directly
+      extractedSections = parsedContent.sections || {};
+      extractedKeywords = parsedContent.keywords || parsedContent.keyThemes || [];
+      extractedSummary = parsedContent.summary || parsedContent.content || '';
+    } else if (aiGeneratedContent) {
+      // Parse markdown-style content manually
+      const contentLines = normalizedContent.split('\n');
+      let currentSection = '';
+      let sectionContent = '';
+      
+      for (const line of contentLines) {
+        if (line.startsWith('# ') || line.startsWith('## ')) {
+          // Save previous section
+          if (currentSection && sectionContent) {
+            extractedSections[currentSection] = sectionContent.trim();
+          }
+          // Start new section
+          currentSection = line.replace(/^#{1,2} /, '').trim();
+          sectionContent = '';
+        } else if (line.startsWith('- ') && (currentSection.includes('Keywords') || currentSection.includes('keywords'))) {
+          // Extract keywords
+          extractedKeywords.push(line.replace('- ', '').trim());
+        } else if (line.match(/^\d+\./)) {
+          // Handle numbered lists (like follow-ups)
+          if (currentSection && line.trim()) {
+            sectionContent += line + '\\n';
+          }
+        } else if (currentSection && line.trim()) {
+          sectionContent += line + '\\n';
+        }
+      }
+      
+      // Save last section
+      if (currentSection && sectionContent) {
+        extractedSections[currentSection] = sectionContent.trim();
+      }
+      
+      // Extract title from the content
+      let extractedTitle = '';
+      if (normalizedContent.includes('**Title**:')) {
+        const titleMatch = normalizedContent.match(/\*\*Title\*\*:\s*([^\n]+)/i);
+        if (titleMatch) {
+          extractedTitle = titleMatch[1].trim();
+        }
+      }
+      
+      // Extract keywords from the content - handle multiple formats
+      if (normalizedContent.includes('Keywords:') || normalizedContent.includes('**Keywords**:')) {
+        // Handle format: - **Keywords**: word1, word2, word3
+        const keywordsMatch = normalizedContent.match(/\*\*Keywords\*\*:\s*([^\n]+)/i) || 
+                             normalizedContent.match(/Keywords:\s*([^\n]+)/i);
+        if (keywordsMatch) {
+          const keywordsList = keywordsMatch[1].split(',').map(k => k.trim());
+          extractedKeywords.push(...keywordsList);
+        }
+      }
+      
+      // Clean up sections to remove metadata at the end
+      Object.keys(extractedSections).forEach(sectionKey => {
+        let sectionContent = extractedSections[sectionKey];
+        // Remove everything after the --- separator (metadata section)
+        if (sectionContent.includes('---')) {
+          sectionContent = sectionContent.split('---')[0].trim();
+          extractedSections[sectionKey] = sectionContent;
+        }
+      });
+      
+      // Set extracted title if found
+      if (extractedTitle) {
+        extractedSummary = extractedTitle; // Use title as summary if no other summary
+      }
+      
+      // Use first section as summary if no explicit summary
+      const sectionKeys = Object.keys(extractedSections);
+      if (sectionKeys.length > 0 && !extractedSummary) {
+        extractedSummary = extractedSections[sectionKeys[0]].substring(0, 300) + '...';
+      }
+    }
+    
+    console.log('🔍 EXTRACTED SECTIONS:', Object.keys(extractedSections));
+    console.log('🔍 EXTRACTED KEYWORDS:', extractedKeywords);
+    
+    // Calculate word count from the actual content
+    const totalContent = Object.values(extractedSections).join(' ') + ' ' + extractedSummary;
+    const calculatedWordCount = totalContent.split(/\s+/).filter(word => word.length > 0).length;
+    const estimatedReadingTime = Math.max(1, Math.ceil(calculatedWordCount / 250)); // 250 words per minute
+    
+    // Extract title from AI content or use default
+    let finalTitle = '';
+    if (normalizedContent && normalizedContent.includes('**Title**:')) {
+      const titleMatch = normalizedContent.match(/\*\*Title\*\*:\s*([^\n]+)/i);
+      if (titleMatch) {
+        finalTitle = titleMatch[1].trim();
+      }
+    }
+    
+    if (!finalTitle) {
+      finalTitle = parsedContent?.title || result.title || `Life Story Draft - ${interviewMetadata.name || interviewMetadata.clientName || 'Interview'} ${new Date().toLocaleDateString()}`;
+    }
+    
+    console.log('🔍 CALCULATED WORD COUNT:', calculatedWordCount);
+    console.log('🔍 EXTRACTED TITLE:', finalTitle);
     
     // Normalize the response format to match expected structure
     const normalizedDraft = {
-      title: result.title || `Life Story Draft - ${interviewMetadata.name || 'Interview'} ${new Date().toLocaleDateString()}`,
+      title: finalTitle,
       content: {
-        summary: result.summary || result.content?.summary || 'AI-generated summary',
-        sections: result.sections || result.content?.sections || {},
-        keyThemes: result.keyThemes || result.content?.keyThemes || [],
+        summary: extractedSummary || aiGeneratedContent.substring(0, 200) + '...' || 'AI-generated summary from real endpoint',
+        sections: Object.keys(extractedSections).length > 0 ? extractedSections : {
+          introduction: 'AI-generated introduction',
+          mainStory: aiGeneratedContent || 'AI-generated main story',
+          conclusion: 'AI-generated conclusion'
+        },
+        keyThemes: extractedKeywords.length > 0 ? extractedKeywords : [],
         metadata: {
-          wordCount: result.wordCount || result.content?.metadata?.wordCount || 0,
-          estimatedReadingTime: result.estimatedReadingTime || result.content?.metadata?.estimatedReadingTime || '0 minutes',
+          wordCount: calculatedWordCount,
+          estimatedReadingTime: `${estimatedReadingTime} minutes`,
           generatedAt: new Date().toISOString(),
           sourceInterview: interviewMetadata.id,
           processingMethod: 'AI_REAL_GENERATION',
-          aiModel: result.model || 'unknown',
-          confidence: result.confidence || null
+          aiModel: result.model || result.aiModel || 'n8n-endpoint',
+          confidence: result.confidence || null,
+          endpointUrl: draftEndpointUrl
         }
       },
       status: result.status || 'draft',
@@ -314,18 +498,20 @@ const generateDraft = async (content, interviewMetadata) => {
       createdAt: new Date().toISOString()
     };
     
+    console.log('🔍 NORMALIZED DRAFT BEING RETURNED:', JSON.stringify(normalizedDraft, null, 2));
     return normalizedDraft;
   });
 };
 
 /**
  * Main processing function that handles the complete workflow
+ * Simplified flow: Audio → Transcription → Draft Generation OR Text → Draft Generation
  * @param {string} filePath - Path to uploaded file
  * @param {Object} interviewData - Interview metadata
  * @returns {Promise<Object>} - Processing results
  */
 const processInterviewFile = async (filePath, interviewData) => {
-  console.log('🚀 Starting interview file processing workflow');
+  console.log('🚀 Starting simplified interview file processing workflow');
   const startTime = Date.now();
   
   try {
@@ -336,17 +522,26 @@ const processInterviewFile = async (filePath, interviewData) => {
     if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm', 'flac'].includes(fileExtension)) {
       console.log('🎵 Audio file detected, starting transcription...');
       textContent = await transcribeAudio(filePath);
+      console.log('✅ Transcription completed, proceeding directly to draft generation');
     } else if (['txt', 'md', 'pdf', 'doc', 'docx'].includes(fileExtension)) {
-      console.log('📄 Text file detected, processing...');
-      // In a real implementation, we'd read and parse the file content
-      const fileContent = config.ai.mockMode ? 'Mock text content from uploaded file' : fs.readFileSync(filePath, 'utf8');
-      textContent = await processText(fileContent);
+      console.log('📄 Text file detected, reading content directly...');
+      // Read file content directly without processText stage
+      if (config.ai.mockMode) {
+        textContent = 'Mock text content from uploaded file for testing purposes';
+      } else {
+        textContent = fs.readFileSync(filePath, 'utf8');
+      }
+      console.log('✅ Text content loaded, proceeding directly to draft generation');
     } else {
       throw new Error(`Unsupported file type: ${fileExtension}`);
     }
     
-    // Generate AI draft
-    console.log('🤖 Generating AI draft...');
+    // Validate text content
+    if (!textContent || textContent.trim().length === 0) {
+      throw new Error('No text content available for draft generation');
+    }
+    
+    // Generate AI draft directly from text content    
     const draft = await generateDraft(textContent, interviewData);
     
     const processingTime = Date.now() - startTime;
@@ -356,11 +551,13 @@ const processInterviewFile = async (filePath, interviewData) => {
       transcription: textContent,
       draft: draft,
       processingTime: `${processingTime}ms`,
-      message: 'Interview file processed successfully',
+      message: 'Interview file processed successfully with simplified workflow',
       metadata: {
         fileType: fileExtension,
         processingMode: config.ai.mockMode ? 'mock' : 'real',
-        endpointUsed: config.ai.mockMode ? null : config.ai.endpointUrl
+        workflowType: 'simplified_direct_to_draft',
+        textContentLength: textContent.length,
+        endpointUsed: config.ai.mockMode ? null : process.env.AI_DRAFT_GENERETOR_ENDPOINT_URL
       }
     };
     
@@ -460,7 +657,17 @@ const generateFullLifeStory = async (fullStoryData) => {
     return mockGenerateFullLifeStory(fullStoryData);
   }
 
-  try {
+  return withRetry(async () => {
+    // Determine which endpoint URL to use
+    const fullStoryEndpointUrl = process.env.AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL;
+    
+    if (!fullStoryEndpointUrl) {
+      throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
+    }
+
+    console.log('🤖 Using full life story endpoint:', fullStoryEndpointUrl);
+
+    // Prepare payload for the real full life story generator endpoint
     const payload = {
       operation: 'generate_full_story',
       sessionId: fullStoryData.sessionId,
@@ -472,25 +679,85 @@ const generateFullLifeStory = async (fullStoryData) => {
       generatedAt: new Date().toISOString()
     };
 
-    const result = await withRetry(() => callAIEndpoint(payload, 'generate_full_story'));
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Add API key if configured
+    if (config.ai.apiKey) {
+      headers['Authorization'] = `Bearer ${config.ai.apiKey}`;
+    }
+
+    // console.log('🚀 Calling real full life story generator endpoint...');
+    // console.log('📤 PAYLOAD:', JSON.stringify(payload, null, 2));
+
+    // Call the real full life story generator endpoint
+    const response = await axios.post(fullStoryEndpointUrl, payload, {
+      headers,
+      timeout: config.ai.requestTimeout,
+    });
+
+    const result = response.data;
+    // console.log('✅ Real AI full life story generation completed successfully');
+    console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
+
+    // Extract and parse AI content from response
+    let aiContent = result;
     
+    // Handle nested response structure (similar to draft generator)
+    if (result.result) {
+      if (result.result.message?.content) {
+        aiContent = result.result.message.content;
+      } else if (result.result.output) {
+        aiContent = result.result.output;
+      } else if (result.result.content) {
+        aiContent = result.result.content;
+      } else {
+        aiContent = result.result;
+      }
+    }
+
+    // If content is wrapped in markdown code blocks, extract it
+    if (typeof aiContent === 'string' && aiContent.includes('```json')) {
+      const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        try {
+          aiContent = JSON.parse(jsonMatch[1]);
+        } catch (parseError) {
+          console.warn('⚠️ Failed to parse JSON from markdown, using raw content');
+        }
+      }
+    }
+
     const processingTime = Date.now() - startTime;
-    console.log(`✅ AI Service: Full life story generated in ${processingTime}ms`);
-    
-    return {
-      ...result,
+    // console.log(`✅ AI Service: Full life story generated in ${processingTime}ms`);
+
+    // Normalize the response structure
+    const normalizedStory = {
+      title: aiContent.title || aiContent.storyTitle || 'Generated Life Story',
+      content: aiContent.content || aiContent.story || aiContent,
+      chapters: aiContent.chapters || [],
+      timeline: aiContent.timeline || [],
+      keyMoments: aiContent.keyMoments || aiContent.highlights || [],
+      themes: aiContent.themes || aiContent.keyThemes || [],
+      status: 'generated',
+      version: 1,
       metadata: {
-        ...result.metadata,
         processingTime,
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
+        wordCount: typeof aiContent === 'string' ? aiContent.split(/\s+/).length : 0,
+        aiModel: aiContent.metadata?.aiModel || 'n8n-workflow',
+        sourceSessionId: fullStoryData.sessionId,
+        basedOnDrafts: fullStoryData.approvedDrafts?.length || 0,
+        totalInterviews: fullStoryData.totalInterviews || 0,
+        completedInterviews: fullStoryData.completedInterviews || 0
       }
     };
 
-  } catch (error) {
-    console.error('❌ AI Service: Full life story generation failed:', error);
-    console.log('🔄 Falling back to mock generation...');
-    return mockGenerateFullLifeStory(fullStoryData);
-  }
+    console.log('📖 NORMALIZED FULL LIFE STORY:', JSON.stringify(normalizedStory, null, 2));
+    
+    return normalizedStory;
+  });
 };
 
 /**

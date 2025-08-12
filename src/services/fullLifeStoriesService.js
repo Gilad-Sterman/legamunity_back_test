@@ -231,14 +231,40 @@ const getCurrentFullLifeStory = async (sessionId) => {
  */
 const updateFullLifeStoryStatus = async (storyId, updateData) => {
   try {
+    const { status, reason, userId, isRejection } = updateData;
+    const timestamp = new Date().toISOString();
+    
+    // Prepare the update object with only valid database fields
+    const updateObject = {
+      status,
+      updated_at: timestamp
+    };
+
+    // If there's a reason, store it in review_notes with proper formatting
+    if (reason) {
+      const userName = userId || 'Admin';
+      const actionText = isRejection ? 'Rejected' : status === 'approved' ? 'Approved' : 'Updated';
+      const noteEntry = `[${timestamp}] ${userName}: ${actionText} - ${reason}`;
+      
+      updateObject.review_notes = noteEntry;
+      updateObject.reviewed_by = userName;
+      updateObject.reviewed_at = timestamp;
+    }
+
     const { data, error } = await supabase
       .from('full_life_stories')
-      .update({
-        ...updateData,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateObject)
       .eq('id', storyId)
-      .select()
+      .select(`
+        *,
+        sessions (
+          id,
+          client_name,
+          client_age,
+          status,
+          created_at
+        )
+      `)
       .single();
 
     if (error) {
@@ -256,6 +282,58 @@ const updateFullLifeStoryStatus = async (storyId, updateData) => {
 
   } catch (error) {
     console.error('❌ Error in updateFullLifeStoryStatus:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Update full life story review notes
+ * @param {string} storyId - Story ID
+ * @param {string} reviewNotes - Updated review notes
+ * @param {string} reviewedBy - User who added the notes
+ * @returns {Promise<Object>} - Result with success status and updated story
+ */
+const updateFullLifeStoryReviewNotes = async (storyId, reviewNotes, reviewedBy) => {
+  try {
+    const { data, error } = await supabase
+      .from('full_life_stories')
+      .update({
+        review_notes: reviewNotes,
+        reviewed_by: reviewedBy,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', storyId)
+      .select(`
+        *,
+        sessions (
+          id,
+          client_name,
+          client_age,
+          status,
+          created_at
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ Error updating full life story review notes:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    return {
+      success: true,
+      data
+    };
+
+  } catch (error) {
+    console.error('❌ Error in updateFullLifeStoryReviewNotes:', error);
     return {
       success: false,
       error: error.message
@@ -292,6 +370,86 @@ const archiveFullLifeStory = async (storyId) => {
 
   } catch (error) {
     console.error('❌ Error in archiveFullLifeStory:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Get all full life stories across all sessions (current versions only by default)
+ * @param {Object} options - Query options
+ * @param {boolean} options.currentVersionsOnly - Only return current versions (default: true)
+ * @param {string} options.status - Filter by status
+ * @param {string} options.sortBy - Sort field (default: 'generated_at')
+ * @param {string} options.sortOrder - Sort order 'asc' or 'desc' (default: 'desc')
+ * @param {number} options.limit - Limit results
+ * @param {number} options.offset - Offset for pagination
+ * @returns {Promise<Object>} - Result with success status and data array
+ */
+const getAllFullLifeStories = async (options = {}) => {
+  try {
+    const {
+      currentVersionsOnly = true,
+      status,
+      sortBy = 'generated_at',
+      sortOrder = 'desc',
+      limit,
+      offset
+    } = options;
+
+    let query = supabase
+      .from('full_life_stories')
+      .select(`
+        *,
+        sessions (
+          id,
+          client_name,
+          client_age,
+          status,
+          created_at
+        )
+      `);
+
+    // Filter by current versions only
+    if (currentVersionsOnly) {
+      query = query.eq('is_current_version', true);
+    }
+
+    // Filter by status
+    if (status && status !== 'all') {
+      query = query.eq('status', status);
+    }
+
+    // Apply sorting
+    query = query.order(sortBy, { ascending: sortOrder === 'asc' });
+
+    // Apply pagination
+    if (limit) {
+      query = query.limit(limit);
+    }
+    if (offset) {
+      query = query.range(offset, offset + (limit || 50) - 1);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ Error fetching all full life stories:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    return {
+      success: true,
+      data: data || []
+    };
+
+  } catch (error) {
+    console.error('❌ Error in getAllFullLifeStories:', error);
     return {
       success: false,
       error: error.message
@@ -354,8 +512,10 @@ module.exports = {
   createFullLifeStory,
   getFullLifeStoryById,
   getFullLifeStoriesBySession,
+  getAllFullLifeStories,
   getCurrentFullLifeStory,
   updateFullLifeStoryStatus,
+  updateFullLifeStoryReviewNotes,
   archiveFullLifeStory,
   getFullLifeStoriesStats
 };

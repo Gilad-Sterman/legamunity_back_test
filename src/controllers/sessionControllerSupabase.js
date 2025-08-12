@@ -597,7 +597,7 @@ const uploadInterviewFile = async (req, res) => {
     let transcription = null;
     let processedContent = null;
 
-    // Step 1: Process file based on type
+    // Step 1: Process file based on type (simplified workflow - no processText stage)
     if (isAudioFile) {
       console.log('🎵 Processing audio file for transcription...');
       // For audio files, we simulate using the file path (in real implementation, this would be the actual file path)
@@ -605,10 +605,10 @@ const uploadInterviewFile = async (req, res) => {
       transcription = await aiService.transcribeAudio(mockFilePath);
       processedContent = transcription;
     } else {
-      console.log('📄 Processing text file...');
-      // For text files, simulate reading content
+      console.log('📄 Processing text file directly (no processText stage)...');
+      // For text files, read content directly without processText stage
       const textContent = file.buffer.toString('utf8');
-      processedContent = await aiService.processText(textContent);
+      processedContent = textContent; // Direct assignment, no processing
     }
 
     // Step 2: Generate AI draft from processed content
@@ -627,6 +627,7 @@ const uploadInterviewFile = async (req, res) => {
     };
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
+    console.log('🔍 RECEIVED DRAFT FROM AI SERVICE:', JSON.stringify(generatedDraft, null, 2));
 
     // Step 3: Find the interview in normalized table
     const supabase = require('../config/database');
@@ -705,9 +706,11 @@ const uploadInterviewFile = async (req, res) => {
     }
 
     // Step 5: Create draft for this specific interview
+    console.log('🔍 ACCESSING DRAFT CONTENT - generatedDraft.content:', JSON.stringify(generatedDraft.content, null, 2));
+    
     const draftContent = {
-      summary: generatedDraft.summary || "This interview session captured valuable insights about the subject's life journey through file upload and AI processing.",
-      sections: generatedDraft.sections || {
+      summary: generatedDraft.content?.summary || "This interview session captured valuable insights about the subject's life journey through file upload and AI processing.",
+      sections: generatedDraft.content?.sections || {
         introduction: "Based on the uploaded file, this section introduces the subject and provides context for their life story.",
         earlyLife: "Early life experiences and memories captured from the interview content.",
         careerJourney: "Professional journey and career milestones discussed in the interview.",
@@ -715,7 +718,7 @@ const uploadInterviewFile = async (req, res) => {
         lifeWisdom: "Wisdom and life lessons shared during the interview session.",
         conclusion: "Summary and reflection on the life story captured through this interview."
       },
-      keyThemes: generatedDraft.keyThemes || [
+      keyThemes: generatedDraft.content?.keyThemes || [
         "Personal Growth",
         "Life Experiences", 
         "Family and Heritage",

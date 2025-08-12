@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const draftService = require('../services/draftService');
+// const draftService = require('../services/draftService');
 
 /**
  * @route POST /api/test-drafts/simulate-completion

@@ -10,7 +10,6 @@ dotenv.config();
 
 
 const interviewRoutes = require('./routes/interviews');
-const testDraftsRoutes = require('./routes/test-drafts');
 const supabaseRoutes = require('./routes/supabaseRoutes');
 const supabaseAuthRoutes = require('./routes/supabaseAuth');
 const sessionsSupabaseRoutes = require('./routes/sessionsSupabase');
@@ -18,7 +17,6 @@ const fullLifeStoriesRoutes = require('./routes/fullLifeStories');
 // const adminRoutes = require('./routes/admin'); // Temporarily disabled due to missing controllers
 const logsRoutes = require('./routes/logs');
 const migrationRoutes = require('./routes/migration');
-const aiTestRoutes = require('./routes/aiTest');
 const { loggingMiddleware, errorLoggingMiddleware, requestLoggingMiddleware } = require('./middleware/loggingMiddleware');
 
 // Initialize express app
@@ -38,7 +36,6 @@ app.use(loggingMiddleware); // Add logging helpers to requests
 // Routes
 
 app.use('/api/interviews', interviewRoutes);
-app.use('/api/test-drafts', testDraftsRoutes);
 app.use('/api/supabase', supabaseRoutes);
 app.use('/api/supabase-auth', supabaseAuthRoutes);
 app.use('/api/sessions-supabase', sessionsSupabaseRoutes);
@@ -46,7 +43,6 @@ app.use('/api/admin/full-life-stories', fullLifeStoriesRoutes);
 // app.use('/api/admin', adminRoutes); // Temporarily disabled due to missing controllers
 app.use('/api/logs', logsRoutes);
 app.use('/api/migration', migrationRoutes);
-app.use('/api/ai', aiTestRoutes);
 
 // API root route
 app.get('/api', (req, res) => {

@@ -665,7 +665,7 @@ const generateFullLifeStory = async (fullStoryData) => {
       throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
     }
 
-    console.log('🤖 Using full life story endpoint:', fullStoryEndpointUrl);
+    // console.log('🤖 Using full life story endpoint:', fullStoryEndpointUrl);
 
     // Prepare payload for the real full life story generator endpoint
     const payload = {
@@ -699,13 +699,17 @@ const generateFullLifeStory = async (fullStoryData) => {
 
     const result = response.data;
     // console.log('✅ Real AI full life story generation completed successfully');
-    console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
+    // console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
 
     // Extract and parse AI content from response
     let aiContent = result;
     
+    // Handle direct output field (n8n workflow response)
+    if (result.output) {
+      aiContent = result.output;
+    }
     // Handle nested response structure (similar to draft generator)
-    if (result.result) {
+    else if (result.result) {
       if (result.result.message?.content) {
         aiContent = result.result.message.content;
       } else if (result.result.output) {
@@ -754,7 +758,7 @@ const generateFullLifeStory = async (fullStoryData) => {
       }
     };
 
-    console.log('📖 NORMALIZED FULL LIFE STORY:', JSON.stringify(normalizedStory, null, 2));
+    // console.log('📖 NORMALIZED FULL LIFE STORY:', JSON.stringify(normalizedStory, null, 2));
     
     return normalizedStory;
   });

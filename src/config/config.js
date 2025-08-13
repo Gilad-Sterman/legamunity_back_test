@@ -28,7 +28,7 @@ module.exports = {
     apiKey: process.env.AI_API_KEY || null,
     
     // Enable/disable mock mode (when true, uses mock responses instead of real API)
-    mockMode: process.env.AI_MOCK_MODE === 'true' || !process.env.AI_ENDPOINT_URL,
+    mockMode: false,
     
     // Request timeout in milliseconds
     requestTimeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 60000, // 60 seconds

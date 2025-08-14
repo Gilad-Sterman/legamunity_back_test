@@ -333,9 +333,9 @@ const generateDraft = async (content, interviewMetadata) => {
           try {
             const parsedOutput = JSON.parse(jsonMatch[1]);
             aiGeneratedContent = parsedOutput.summary_markdown || parsedOutput.content || parsedOutput.summary || '';
-            console.log('🔍 EXTRACTED FROM OUTPUT JSON:', aiGeneratedContent.substring(0, 200) + '...');
+
           } catch (e) {
-            console.log('🔍 FAILED TO PARSE OUTPUT JSON, USING RAW OUTPUT');
+
             aiGeneratedContent = outputContent;
           }
         } else {
@@ -353,16 +353,19 @@ const generateDraft = async (content, interviewMetadata) => {
     try {
       if (aiGeneratedContent.startsWith('{') || aiGeneratedContent.startsWith('[')) {
         parsedContent = JSON.parse(aiGeneratedContent);
-        console.log('🔍 PARSED AI CONTENT AS JSON:', JSON.stringify(parsedContent, null, 2));
+
       }
     } catch (e) {
-      console.log('🔍 AI CONTENT IS NOT JSON, TREATING AS TEXT');
+
     }
     
     // Extract sections from the structured content
     let extractedSections = {};
     let extractedKeywords = [];
     let extractedSummary = '';
+    let extractedFollowUps = [];
+    let extractedToVerify = {};
+    let extractedCategories = [];
     
     // Handle both actual newlines and escaped newlines for all content processing
     const normalizedContent = aiGeneratedContent ? aiGeneratedContent.replace(/\\n/g, '\n') : '';
@@ -372,21 +375,88 @@ const generateDraft = async (content, interviewMetadata) => {
       extractedSections = parsedContent.sections || {};
       extractedKeywords = parsedContent.keywords || parsedContent.keyThemes || [];
       extractedSummary = parsedContent.summary || parsedContent.content || '';
+      extractedFollowUps = parsedContent.followUps || parsedContent['follow-ups'] || [];
+      extractedToVerify = parsedContent.toVerify || parsedContent['to-verify'] || {};
+      extractedCategories = parsedContent.categories || [];
     } else if (aiGeneratedContent) {
       // Parse markdown-style content manually
       const contentLines = normalizedContent.split('\n');
       let currentSection = '';
       let sectionContent = '';
+      let inFollowUps = false;
+      let inToVerify = false;
+      let toVerifyTable = { people: [], places: [], organizations: [], dates: [] };
+      
+
       
       for (const line of contentLines) {
-        if (line.startsWith('# ') || line.startsWith('## ')) {
+        if (line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### ')) {
           // Save previous section
           if (currentSection && sectionContent) {
             extractedSections[currentSection] = sectionContent.trim();
           }
           // Start new section
-          currentSection = line.replace(/^#{1,2} /, '').trim();
+          currentSection = line.replace(/^#{1,3} /, '').trim();
           sectionContent = '';
+          
+          // Reset special section flags for regular markdown headers
+          inFollowUps = false;
+          inToVerify = false;
+          
+          // Check if we're entering special sections
+          inFollowUps = currentSection.toLowerCase().includes('follow') && currentSection.toLowerCase().includes('up');
+          inToVerify = currentSection.toLowerCase().includes('verify') || currentSection.toLowerCase().includes('to-verify');
+        } else if (line.startsWith('Follow-ups:') || line.startsWith('Follow-Ups:')) {
+          // Save previous section before switching
+          if (currentSection && sectionContent) {
+            extractedSections[currentSection] = sectionContent.trim();
+          }
+          // Handle Follow-ups section without markdown header
+
+          inFollowUps = true;
+          inToVerify = false;
+          currentSection = 'Follow-ups';
+          sectionContent = '';
+        } else if (line.startsWith('To-Verify:') || line.startsWith('To-verify:')) {
+          // Save previous section before switching
+          if (currentSection && sectionContent) {
+            extractedSections[currentSection] = sectionContent.trim();
+          }
+          // Handle To-Verify section without markdown header
+
+          inToVerify = true;
+          inFollowUps = false;
+          currentSection = 'To-Verify';
+          sectionContent = '';
+        } else if (inFollowUps && line.match(/^\d+\./)) {
+          // Extract follow-up questions
+          const followUpText = line.replace(/^\d+\.\s*/, '').trim();
+          if (followUpText) {
+
+            extractedFollowUps.push(followUpText);
+          }
+        } else if (inToVerify && line.includes('|') && !line.startsWith('|---')) {
+          // Parse To-Verify table rows
+          const allCells = line.split('|').map(cell => cell.trim());
+          // Remove empty cells from start/end but keep internal empty cells
+          const cells = allCells.slice(1, -1); // Remove first and last empty cells from | ... |
+          
+          // Skip header row
+          if (!line.toLowerCase().includes('people') && !line.toLowerCase().includes('places') && cells.length > 0) {
+            // Process data rows - handle variable number of cells
+            const people = cells[0] || '';
+            const places = cells[1] || '';
+            const organizations = cells[2] || '';
+            const dates = cells[3] || '';
+            
+
+            
+            // Add non-empty values to appropriate arrays
+            if (people && people !== '' && people !== 'People') toVerifyTable.people.push(people);
+            if (places && places !== '' && places !== 'Places') toVerifyTable.places.push(places);
+            if (organizations && organizations !== '' && organizations !== 'Organizations') toVerifyTable.organizations.push(organizations);
+            if (dates && dates !== '' && dates !== 'Dates') toVerifyTable.dates.push(dates);
+          }
         } else if (line.startsWith('- ') && (currentSection.includes('Keywords') || currentSection.includes('keywords'))) {
           // Extract keywords
           extractedKeywords.push(line.replace('- ', '').trim());
@@ -403,6 +473,12 @@ const generateDraft = async (content, interviewMetadata) => {
       // Save last section
       if (currentSection && sectionContent) {
         extractedSections[currentSection] = sectionContent.trim();
+      }
+      
+      // Set extracted To-Verify data if any was found
+      if (toVerifyTable.people.length > 0 || toVerifyTable.places.length > 0 || 
+          toVerifyTable.organizations.length > 0 || toVerifyTable.dates.length > 0) {
+        extractedToVerify = toVerifyTable;
       }
       
       // Extract title from the content
@@ -440,15 +516,26 @@ const generateDraft = async (content, interviewMetadata) => {
         extractedSummary = extractedTitle; // Use title as summary if no other summary
       }
       
-      // Use first section as summary if no explicit summary
+      // Use the main content as summary if no explicit summary
       const sectionKeys = Object.keys(extractedSections);
       if (sectionKeys.length > 0 && !extractedSummary) {
-        extractedSummary = extractedSections[sectionKeys[0]].substring(0, 300) + '...';
+        // Filter out special sections and use actual story content
+        const storyKeys = sectionKeys.filter(key => 
+          !key.toLowerCase().includes('follow') && 
+          !key.toLowerCase().includes('verify') &&
+          !key.toLowerCase().includes('keyword')
+        );
+        if (storyKeys.length > 0) {
+          extractedSummary = extractedSections[storyKeys[0]];
+        } else {
+          extractedSummary = aiGeneratedContent.substring(0, 500) + '...';
+        }
       }
+      
+
     }
     
-    console.log('🔍 EXTRACTED SECTIONS:', Object.keys(extractedSections));
-    console.log('🔍 EXTRACTED KEYWORDS:', extractedKeywords);
+
     
     // Calculate word count from the actual content
     const totalContent = Object.values(extractedSections).join(' ') + ' ' + extractedSummary;
@@ -468,20 +555,36 @@ const generateDraft = async (content, interviewMetadata) => {
       finalTitle = parsedContent?.title || result.title || `Life Story Draft - ${interviewMetadata.name || interviewMetadata.clientName || 'Interview'} ${new Date().toLocaleDateString()}`;
     }
     
-    console.log('🔍 CALCULATED WORD COUNT:', calculatedWordCount);
-    console.log('🔍 EXTRACTED TITLE:', finalTitle);
+
     
     // Normalize the response format to match expected structure
     const normalizedDraft = {
       title: finalTitle,
       content: {
         summary: extractedSummary || aiGeneratedContent.substring(0, 200) + '...' || 'AI-generated summary from real endpoint',
-        sections: Object.keys(extractedSections).length > 0 ? extractedSections : {
+        sections: Object.keys(extractedSections).length > 0 ? 
+          // Filter out sections with minimal/empty content
+          Object.fromEntries(
+            Object.entries(extractedSections).filter(([key, content]) => {
+              const cleanContent = content.trim();
+              // Remove sections that are just "|", empty, or contain only special characters/whitespace
+              return cleanContent.length > 2 && 
+                     cleanContent !== '|' && 
+                     cleanContent !== '||' && 
+                     cleanContent !== '|||' &&
+                     !(/^[\s\|\-\*\#]*$/.test(cleanContent)) && // Only whitespace, pipes, dashes, asterisks, hashes
+                     !key.toLowerCase().includes('to-verify') && // Remove To-Verify sections
+                     !key.toLowerCase().includes('toverify');
+            })
+          ) : {
           introduction: 'AI-generated introduction',
           mainStory: aiGeneratedContent || 'AI-generated main story',
           conclusion: 'AI-generated conclusion'
         },
         keyThemes: extractedKeywords.length > 0 ? extractedKeywords : [],
+        followUps: extractedFollowUps.length > 0 ? extractedFollowUps : [],
+        toVerify: Object.keys(extractedToVerify).length > 0 ? extractedToVerify : {},
+        categories: extractedCategories.length > 0 ? extractedCategories : [],
         metadata: {
           wordCount: calculatedWordCount,
           estimatedReadingTime: `${estimatedReadingTime} minutes`,
@@ -497,8 +600,7 @@ const generateDraft = async (content, interviewMetadata) => {
       version: result.version || '1.0',
       createdAt: new Date().toISOString()
     };
-    
-    console.log('🔍 NORMALIZED DRAFT BEING RETURNED:', JSON.stringify(normalizedDraft, null, 2));
+
     return normalizedDraft;
   });
 };

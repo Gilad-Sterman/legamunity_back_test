@@ -330,7 +330,6 @@ const addInterviewToSession = async (req, res) => {
   try {
     const { id: sessionId } = req.params;
     const interviewData = req.body;
-    console.log('interviewData', interviewData);
     // Validate required fields - interviews can be created with minimal data
     // The frontend sends: name, type, duration, status
     // We'll set reasonable defaults for missing fields
@@ -361,14 +360,7 @@ const addInterviewToSession = async (req, res) => {
 
     // Log interview creation
     try {
-      console.log('Attempting to log interview creation:', {
-        sessionId,
-        interviewId: interviewData.id,
-        userId: req.user?.id,
-        userEmail: req.user?.email
-      });
       await req.logInterviewCreated(sessionId, interviewData.id, interviewData);
-      console.log('Interview creation logged successfully');
     } catch (logError) {
       console.error('Failed to log interview creation:', logError);
     }
@@ -599,20 +591,17 @@ const uploadInterviewFile = async (req, res) => {
 
     // Step 1: Process file based on type (simplified workflow - no processText stage)
     if (isAudioFile) {
-      console.log('🎵 Processing audio file for transcription...');
       // For audio files, we simulate using the file path (in real implementation, this would be the actual file path)
       const mockFilePath = `uploads/interviews/${interviewId}/${file.originalname}`;
       transcription = await aiService.transcribeAudio(mockFilePath);
       processedContent = transcription;
     } else {
-      console.log('📄 Processing text file directly (no processText stage)...');
       // For text files, read content directly without processText stage
       const textContent = file.buffer.toString('utf8');
       processedContent = textContent; // Direct assignment, no processing
     }
 
     // Step 2: Generate AI draft from processed content
-    console.log('🤖 Generating AI draft from processed content...');
     // Calculate actual file duration and word count
     const calculatedDuration = isAudioFile ? _getFileDuration(file) : _getEstimatedReadingDuration(processedContent);
     const calculatedWordCount = _getFileWordCount(isAudioFile ? transcription : processedContent);
@@ -627,7 +616,6 @@ const uploadInterviewFile = async (req, res) => {
     };
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
-    console.log('🔍 RECEIVED DRAFT FROM AI SERVICE:', JSON.stringify(generatedDraft, null, 2));
 
     // Step 3: Find the interview in normalized table
     const supabase = require('../config/database');
@@ -706,7 +694,6 @@ const uploadInterviewFile = async (req, res) => {
     }
 
     // Step 5: Create draft for this specific interview
-    console.log('🔍 ACCESSING DRAFT CONTENT - generatedDraft.content:', JSON.stringify(generatedDraft.content, null, 2));
     
     const draftContent = {
       summary: generatedDraft.content?.summary || "This interview session captured valuable insights about the subject's life journey through file upload and AI processing.",
@@ -725,6 +712,14 @@ const uploadInterviewFile = async (req, res) => {
         "Career Development",
         "Wisdom and Reflection"
       ],
+      followUps: generatedDraft.content?.followUps || [],
+      toVerify: generatedDraft.content?.toVerify || {
+        people: [],
+        places: [],
+        organizations: [],
+        dates: []
+      },
+      categories: generatedDraft.content?.categories || [],
       metadata: {
         wordCount: calculatedWordCount,
         generatedAt: new Date().toISOString(),

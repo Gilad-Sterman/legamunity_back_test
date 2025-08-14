@@ -24,20 +24,20 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  */
 const withRetry = async (fn, maxRetries = config.ai.maxRetries, delay = config.ai.retryDelay) => {
   let lastError;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error;
       console.warn(`🔄 AI Service attempt ${attempt}/${maxRetries} failed:`, error.message);
-      
+
       if (attempt < maxRetries) {
         await sleep(delay * attempt); // Exponential backoff
       }
     }
   }
-  
+
   throw new Error(`AI Service failed after ${maxRetries} attempts. Last error: ${lastError.message}`);
 };
 
@@ -132,10 +132,10 @@ const uploadFileToAI = async (filePath, operation, metadata = {}) => {
  */
 const mockTranscribeAudio = async (audioFilePath) => {
   console.log('🎤 [MOCK] Transcribing audio file:', audioFilePath);
-  
+
   // Simulate processing time
   await sleep(2000);
-  
+
   // Mock transcription result
   const mockTranscription = `
 This is a mock transcription of the audio file. In a real implementation, this would be the actual transcribed text from the audio file.
@@ -149,7 +149,7 @@ The interview covered topics including:
 
 This transcription would be much longer and contain the actual spoken content from the interview.
   `.trim();
-  
+
   console.log('✅ [MOCK] Transcription completed');
   return mockTranscription;
 };
@@ -169,7 +169,7 @@ const transcribeAudio = async (audioFilePath) => {
       fileType: 'audio',
       language: 'auto-detect', // or specific language code
     });
-    
+
     console.log('✅ Real AI transcription completed');
     return result.transcription || result.text || result.content;
   });
@@ -182,10 +182,10 @@ const transcribeAudio = async (audioFilePath) => {
  */
 const mockProcessText = async (textContent) => {
   console.log('📝 [MOCK] Processing text content');
-  
+
   // Simulate processing time
   await sleep(1000);
-  
+
   console.log('✅ [MOCK] Text processing completed');
   return textContent;
 };
@@ -205,7 +205,7 @@ const processText = async (textContent) => {
       content: textContent,
       contentType: 'text',
     }, 'process');
-    
+
     console.log('✅ Real AI text processing completed');
     return result.processedContent || result.content || textContent;
   });
@@ -219,30 +219,30 @@ const processText = async (textContent) => {
  */
 const mockGenerateDraft = async (content, interviewMetadata) => {
   console.log('🤖 [MOCK] Generating AI draft for interview:', interviewMetadata.id);
-  
+
   // Simulate AI processing time
   await sleep(3000);
-  
+
   // Mock draft generation
   const mockDraft = {
     title: `Life Story Draft - ${interviewMetadata.name || 'Interview'} ${new Date().toLocaleDateString()}`,
     content: {
       summary: `This interview session captured valuable insights about the subject's life journey. The conversation covered personal experiences, family history, and important life events.`,
-      
+
       sections: {
         introduction: `Based on the interview conducted, this section introduces the subject and provides context for their life story.`,
-        
+
         earlyLife: `The early life section covers childhood memories, family background, and formative experiences that shaped the subject's character.`,
-        
+
         careerJourney: `This section details the professional journey, career milestones, and significant achievements throughout their working life.`,
-        
+
         personalRelationships: `Personal relationships and family connections are explored, highlighting important people who influenced their life.`,
-        
+
         lifeWisdom: `The wisdom and life lessons learned over the years are captured, providing valuable insights for future generations.`,
-        
+
         conclusion: `The conclusion ties together the various aspects of the life story, creating a cohesive narrative of the subject's journey.`
       },
-      
+
       keyThemes: [
         'Family and Heritage',
         'Personal Growth',
@@ -250,7 +250,7 @@ const mockGenerateDraft = async (content, interviewMetadata) => {
         'Life Challenges',
         'Wisdom and Reflection'
       ],
-      
+
       metadata: {
         wordCount: 2500,
         estimatedReadingTime: '10 minutes',
@@ -259,12 +259,12 @@ const mockGenerateDraft = async (content, interviewMetadata) => {
         processingMethod: 'AI_MOCK_GENERATION'
       }
     },
-    
+
     status: 'draft',
     version: '1.0',
     createdAt: new Date().toISOString()
   };
-  
+
   console.log('✅ [MOCK] AI draft generation completed');
   return mockDraft;
 };
@@ -275,6 +275,7 @@ const mockGenerateDraft = async (content, interviewMetadata) => {
  * @param {Object} interviewMetadata - Interview metadata for context
  * @returns {Promise<Object>} - Generated draft content
  */
+// new version
 const generateDraft = async (content, interviewMetadata) => {
   if (config.ai.mockMode) {
     return mockGenerateDraft(content, interviewMetadata);
@@ -333,9 +334,7 @@ const generateDraft = async (content, interviewMetadata) => {
           try {
             const parsedOutput = JSON.parse(jsonMatch[1]);
             aiGeneratedContent = parsedOutput.summary_markdown || parsedOutput.content || parsedOutput.summary || '';
-
           } catch (e) {
-
             aiGeneratedContent = outputContent;
           }
         } else {
@@ -348,15 +347,15 @@ const generateDraft = async (content, interviewMetadata) => {
       // Fallback to other fields
       aiGeneratedContent = result.message?.content || result.content || '';
     }    
+    
     // Try to parse the AI content as JSON if it looks like structured data
     let parsedContent = null;
     try {
       if (aiGeneratedContent.startsWith('{') || aiGeneratedContent.startsWith('[')) {
         parsedContent = JSON.parse(aiGeneratedContent);
-
       }
     } catch (e) {
-
+      // Not JSON, continue with text parsing
     }
     
     // Extract sections from the structured content
@@ -364,8 +363,267 @@ const generateDraft = async (content, interviewMetadata) => {
     let extractedKeywords = [];
     let extractedSummary = '';
     let extractedFollowUps = [];
-    let extractedToVerify = {};
+    let extractedToVerify = { people: [], places: [], organizations: [], dates: [] };
     let extractedCategories = [];
+    
+    // Function to extract follow-ups from text with improved patterns
+    const extractFollowUpsFromText = (text) => {
+      const followUps = [];
+            
+      // Multiple patterns to match Follow-ups section with more flexibility
+      const patterns = [
+        /\*\*Follow-ups\*\*:\s*\n((?:\s*\d+\..*?\n?)*)/gi,
+        /Follow-ups\*\*:\s*\n((?:\s*\d+\..*?\n?)*)/gi,
+        /- \*\*Follow-ups\*\*:\s*\n((?:\s*\d+\..*?\n?)*)/gi,
+        /\*\*Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi,
+        /Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi
+      ];
+      
+      let followUpMatch = null;
+      let matchedPattern = -1;
+      
+      for (let i = 0; i < patterns.length; i++) {
+        const pattern = patterns[i];
+        followUpMatch = text.match(pattern);
+        if (followUpMatch) {
+          matchedPattern = i;
+          break;
+        }
+      }
+      
+      if (followUpMatch) {
+        const followUpText = followUpMatch[0];
+        
+        // Extract numbered questions with multiple patterns
+        const questionPatterns = [
+          /\d+\.\s+([^\n]+?)(?=\n\d+\.|\n\*\*|\n-|$)/g,
+          /\d+\.\s*([^\n\\]+)/g,
+          /\d+\.\s+(.+?)(?=\\\n|\n|$)/g
+        ];
+        
+        let questions = null;
+        for (const qPattern of questionPatterns) {
+          questions = [...followUpText.matchAll(qPattern)];
+          if (questions.length > 0) {
+            break;
+          }
+        }
+        
+        if (questions && questions.length > 0) {
+          questions.forEach((match, index) => {
+            const question = match[1] ? match[1].trim() : '';
+            // console.log(`Question ${index + 1}:`, question);
+            if (question && question.length > 5) {
+              followUps.push(question);
+            }
+          });
+        } else {
+          // Fallback: look for any line that looks like a question
+          const lines = followUpText.split(/\\n|\n/);
+          lines.forEach(line => {
+            const cleanLine = line.replace(/^\s*\d+\.\s*/, '').trim();
+            if (cleanLine.includes('?') && cleanLine.length > 10) {
+              followUps.push(cleanLine);
+            }
+          });
+        }
+      } 
+      
+      return followUps;
+    };
+
+    // Function to extract verification data from text with improved table parsing
+    const extractToVerifyFromText = (text) => {
+      const toVerify = { people: [], places: [], organizations: [], dates: [] };      
+      // Multiple patterns to match To-Verify section
+      const patterns = [
+        /\*\*To-Verify\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi,
+        /To-Verify\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi,
+        /- \*\*To-Verify\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi
+      ];
+      
+      let toVerifyMatch = null;
+      for (const pattern of patterns) {
+        toVerifyMatch = text.match(pattern);
+        if (toVerifyMatch) {
+          break;
+        }
+      }
+      
+      if (toVerifyMatch) {
+        const toVerifyText = toVerifyMatch[0];
+        
+        // Look for table structure - handle both complete and incomplete tables
+        const tableLines = toVerifyText.split(/\\n|\n/).filter(line => line.includes('|'));
+        
+        if (tableLines.length > 0) {
+          // Find header row to understand column structure
+          let headerIndex = -1;
+          let columnMapping = {};
+          
+          for (let i = 0; i < tableLines.length; i++) {
+            const line = tableLines[i];
+            if (line.toLowerCase().includes('people') || 
+                line.toLowerCase().includes('places') || 
+                line.toLowerCase().includes('organizations') ||
+                line.toLowerCase().includes('dates')) {
+              headerIndex = i;
+              
+              // Parse header to understand column positions
+              const headers = line.split('|').map(h => h.trim().toLowerCase());
+              headers.forEach((header, index) => {
+                if (header.includes('people')) columnMapping.people = index;
+                if (header.includes('places')) columnMapping.places = index;
+                if (header.includes('organizations')) columnMapping.organizations = index;
+                if (header.includes('dates')) columnMapping.dates = index;
+              });
+              break;
+            }
+          }
+                    
+          // Process data rows
+          for (let i = headerIndex + 1; i < tableLines.length; i++) {
+            const line = tableLines[i];
+            if (line.includes('---')) continue; // Skip separator rows
+            
+            const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell);
+            
+            if (cells.length >= 2) {
+              // First approach: try to use column mapping
+              if (Object.keys(columnMapping).length > 0) {
+                if (columnMapping.people !== undefined && cells[columnMapping.people]) {
+                  const person = cells[columnMapping.people];
+                  if (person && person !== 'People') {
+                    toVerify.people.push({ name: person, context: 'Mentioned in interview', verified: false });
+                  }
+                }
+                
+                if (columnMapping.places !== undefined && cells[columnMapping.places]) {
+                  const place = cells[columnMapping.places];
+                  if (place && place !== 'Places') {
+                    toVerify.places.push({ name: place, context: 'Location mentioned', verified: false });
+                  }
+                }
+                
+                if (columnMapping.organizations !== undefined && cells[columnMapping.organizations]) {
+                  const org = cells[columnMapping.organizations];
+                  if (org && org !== 'Organizations') {
+                    toVerify.organizations.push({ name: org, context: 'Organization mentioned', verified: false });
+                  }
+                }
+                
+                if (columnMapping.dates !== undefined && cells[columnMapping.dates]) {
+                  const date = cells[columnMapping.dates];
+                  if (date && date !== 'Dates') {
+                    toVerify.dates.push({ date: date, context: 'Time period mentioned', verified: false });
+                  }
+                }
+              } else {
+                // Fallback: assume first column is mixed entities, second is dates
+                const entity = cells[0];
+                const date = cells[1] || '';
+                
+                if (entity && !entity.toLowerCase().includes('people') && !entity.toLowerCase().includes('organizations')) {
+                  // Try to categorize the entity
+                  if (entity.match(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/) || entity.includes('רב')) {
+                    toVerify.people.push({ name: entity, context: 'Mentioned in interview', verified: false });
+                  } else if (entity.match(/University|Academy|ישיבת|School|Company/i)) {
+                    toVerify.organizations.push({ name: entity, context: 'Organization mentioned', verified: false });
+                  } else {
+                    toVerify.places.push({ name: entity, context: 'Location mentioned', verified: false });
+                  }
+                }
+                
+                if (date && !date.toLowerCase().includes('dates')) {
+                  toVerify.dates.push({ date: date, context: 'Time period mentioned', verified: false });
+                }
+              }
+            }
+          }
+        } 
+      } 
+      
+      return toVerify;
+    };
+
+    // Enhanced cleanSectionContent function
+    const cleanSectionContent = (text) => {
+      // Remove the Follow-ups section with multiple patterns
+      text = text.replace(/- \*\*Follow-ups\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
+      text = text.replace(/\*\*Follow-ups\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
+      
+      // Remove the To-Verify section with multiple patterns  
+      text = text.replace(/- \*\*To-Verify\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
+      text = text.replace(/\*\*To-Verify\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
+      
+      // Remove other metadata
+      text = text.replace(/- \*\*Title\*\*:.*?\n/g, '');
+      text = text.replace(/\*\*Title\*\*:.*?\n/g, '');
+      text = text.replace(/- \*\*Keywords\*\*:.*?\n/g, '');
+      text = text.replace(/\*\*Keywords\*\*:.*?\n/g, '');
+      
+      return text.trim();
+    };
+
+    // Updated section processing to handle embedded metadata better
+    const processAllSections = (extractedSections) => {
+      let allFollowUps = [];
+      let allToVerify = { people: [], places: [], organizations: [], dates: [] };
+      const cleanedSections = {};
+
+      for (const [sectionKey, sectionText] of Object.entries(extractedSections)) {        
+        // Extract follow-ups from this section
+        const sectionFollowUps = extractFollowUpsFromText(sectionText);
+        if (sectionFollowUps.length > 0) {
+          allFollowUps = [...allFollowUps, ...sectionFollowUps];
+        }
+        
+        // Extract verification data from this section
+        const sectionToVerify = extractToVerifyFromText(sectionText);
+        const hasVerificationData = sectionToVerify.people.length > 0 || 
+                                   sectionToVerify.places.length > 0 || 
+                                   sectionToVerify.organizations.length > 0 || 
+                                   sectionToVerify.dates.length > 0;
+        
+        if (hasVerificationData) {
+          allToVerify.people = [...allToVerify.people, ...sectionToVerify.people];
+          allToVerify.places = [...allToVerify.places, ...sectionToVerify.places];
+          allToVerify.organizations = [...allToVerify.organizations, ...sectionToVerify.organizations];
+          allToVerify.dates = [...allToVerify.dates, ...sectionToVerify.dates];
+        }
+        
+        // Clean the section content by removing metadata
+        let cleanedContent = cleanSectionContent(sectionText);
+        
+        // Only include section if it has meaningful content after cleaning
+        if (cleanedContent.trim().length > 10) {
+          cleanedSections[sectionKey] = cleanedContent;
+        }
+      }
+
+      // Remove duplicates
+      allFollowUps = [...new Set(allFollowUps)];
+      
+      // Remove duplicate verification items
+      allToVerify.people = allToVerify.people.filter((person, index, self) => 
+        index === self.findIndex(p => p.name === person.name)
+      );
+      allToVerify.places = allToVerify.places.filter((place, index, self) => 
+        index === self.findIndex(p => p.name === place.name)
+      );
+      allToVerify.organizations = allToVerify.organizations.filter((org, index, self) => 
+        index === self.findIndex(o => o.name === org.name)
+      );
+      allToVerify.dates = allToVerify.dates.filter((date, index, self) => 
+        index === self.findIndex(d => d.date === date.date)
+      );
+      
+      return {
+        sections: cleanedSections,
+        followUps: allFollowUps,
+        toVerify: allToVerify
+      };
+    };
     
     // Handle both actual newlines and escaped newlines for all content processing
     const normalizedContent = aiGeneratedContent ? aiGeneratedContent.replace(/\\n/g, '\n') : '';
@@ -376,8 +634,20 @@ const generateDraft = async (content, interviewMetadata) => {
       extractedKeywords = parsedContent.keywords || parsedContent.keyThemes || [];
       extractedSummary = parsedContent.summary || parsedContent.content || '';
       extractedFollowUps = parsedContent.followUps || parsedContent['follow-ups'] || [];
-      extractedToVerify = parsedContent.toVerify || parsedContent['to-verify'] || {};
+      extractedToVerify = parsedContent.toVerify || parsedContent['to-verify'] || { people: [], places: [], organizations: [], dates: [] };
       extractedCategories = parsedContent.categories || [];
+      
+      // Process all sections to extract embedded metadata and clean content
+      const processedData = processAllSections(extractedSections);
+      extractedSections = processedData.sections;
+      extractedFollowUps = [...extractedFollowUps, ...processedData.followUps];
+      extractedToVerify = {
+        people: [...extractedToVerify.people, ...processedData.toVerify.people],
+        places: [...extractedToVerify.places, ...processedData.toVerify.places], 
+        organizations: [...extractedToVerify.organizations, ...processedData.toVerify.organizations],
+        dates: [...extractedToVerify.dates, ...processedData.toVerify.dates]
+      };
+      
     } else if (aiGeneratedContent) {
       // Parse markdown-style content manually
       const contentLines = normalizedContent.split('\n');
@@ -386,9 +656,7 @@ const generateDraft = async (content, interviewMetadata) => {
       let inFollowUps = false;
       let inToVerify = false;
       let toVerifyTable = { people: [], places: [], organizations: [], dates: [] };
-      
 
-      
       for (const line of contentLines) {
         if (line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### ')) {
           // Save previous section
@@ -412,7 +680,6 @@ const generateDraft = async (content, interviewMetadata) => {
             extractedSections[currentSection] = sectionContent.trim();
           }
           // Handle Follow-ups section without markdown header
-
           inFollowUps = true;
           inToVerify = false;
           currentSection = 'Follow-ups';
@@ -423,7 +690,6 @@ const generateDraft = async (content, interviewMetadata) => {
             extractedSections[currentSection] = sectionContent.trim();
           }
           // Handle To-Verify section without markdown header
-
           inToVerify = true;
           inFollowUps = false;
           currentSection = 'To-Verify';
@@ -432,7 +698,6 @@ const generateDraft = async (content, interviewMetadata) => {
           // Extract follow-up questions
           const followUpText = line.replace(/^\d+\.\s*/, '').trim();
           if (followUpText) {
-
             extractedFollowUps.push(followUpText);
           }
         } else if (inToVerify && line.includes('|') && !line.startsWith('|---')) {
@@ -448,8 +713,6 @@ const generateDraft = async (content, interviewMetadata) => {
             const places = cells[1] || '';
             const organizations = cells[2] || '';
             const dates = cells[3] || '';
-            
-
             
             // Add non-empty values to appropriate arrays
             if (people && people !== '' && people !== 'People') toVerifyTable.people.push(people);
@@ -475,10 +738,24 @@ const generateDraft = async (content, interviewMetadata) => {
         extractedSections[currentSection] = sectionContent.trim();
       }
       
-      // Set extracted To-Verify data if any was found
+      // Process all sections to extract embedded metadata and clean content
+      const processedData = processAllSections(extractedSections);
+      extractedSections = processedData.sections;
+      extractedFollowUps = [...extractedFollowUps, ...processedData.followUps];
+      extractedToVerify = {
+        people: [...extractedToVerify.people, ...processedData.toVerify.people],
+        places: [...extractedToVerify.places, ...processedData.toVerify.places],
+        organizations: [...extractedToVerify.organizations, ...processedData.toVerify.organizations], 
+        dates: [...extractedToVerify.dates, ...processedData.toVerify.dates]
+      };
+      
+      // Set extracted To-Verify data if any was found in manual parsing
       if (toVerifyTable.people.length > 0 || toVerifyTable.places.length > 0 || 
           toVerifyTable.organizations.length > 0 || toVerifyTable.dates.length > 0) {
-        extractedToVerify = toVerifyTable;
+        extractedToVerify.people = [...extractedToVerify.people, ...toVerifyTable.people];
+        extractedToVerify.places = [...extractedToVerify.places, ...toVerifyTable.places];
+        extractedToVerify.organizations = [...extractedToVerify.organizations, ...toVerifyTable.organizations];
+        extractedToVerify.dates = [...extractedToVerify.dates, ...toVerifyTable.dates];
       }
       
       // Extract title from the content
@@ -501,16 +778,6 @@ const generateDraft = async (content, interviewMetadata) => {
         }
       }
       
-      // Clean up sections to remove metadata at the end
-      Object.keys(extractedSections).forEach(sectionKey => {
-        let sectionContent = extractedSections[sectionKey];
-        // Remove everything after the --- separator (metadata section)
-        if (sectionContent.includes('---')) {
-          sectionContent = sectionContent.split('---')[0].trim();
-          extractedSections[sectionKey] = sectionContent;
-        }
-      });
-      
       // Set extracted title if found
       if (extractedTitle) {
         extractedSummary = extractedTitle; // Use title as summary if no other summary
@@ -531,11 +798,7 @@ const generateDraft = async (content, interviewMetadata) => {
           extractedSummary = aiGeneratedContent.substring(0, 500) + '...';
         }
       }
-      
-
     }
-    
-
     
     // Calculate word count from the actual content
     const totalContent = Object.values(extractedSections).join(' ') + ' ' + extractedSummary;
@@ -554,8 +817,6 @@ const generateDraft = async (content, interviewMetadata) => {
     if (!finalTitle) {
       finalTitle = parsedContent?.title || result.title || `Life Story Draft - ${interviewMetadata.name || interviewMetadata.clientName || 'Interview'} ${new Date().toLocaleDateString()}`;
     }
-    
-
     
     // Normalize the response format to match expected structure
     const normalizedDraft = {
@@ -600,7 +861,7 @@ const generateDraft = async (content, interviewMetadata) => {
       version: result.version || '1.0',
       createdAt: new Date().toISOString()
     };
-
+    
     return normalizedDraft;
   });
 };
@@ -615,11 +876,11 @@ const generateDraft = async (content, interviewMetadata) => {
 const processInterviewFile = async (filePath, interviewData) => {
   console.log('🚀 Starting simplified interview file processing workflow');
   const startTime = Date.now();
-  
+
   try {
     let textContent = '';
     const fileExtension = filePath.split('.').pop().toLowerCase();
-    
+
     // Determine processing method based on file type
     if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm', 'flac'].includes(fileExtension)) {
       console.log('🎵 Audio file detected, starting transcription...');
@@ -637,17 +898,17 @@ const processInterviewFile = async (filePath, interviewData) => {
     } else {
       throw new Error(`Unsupported file type: ${fileExtension}`);
     }
-    
+
     // Validate text content
     if (!textContent || textContent.trim().length === 0) {
       throw new Error('No text content available for draft generation');
     }
-    
+
     // Generate AI draft directly from text content    
     const draft = await generateDraft(textContent, interviewData);
-    
+
     const processingTime = Date.now() - startTime;
-    
+
     return {
       success: true,
       transcription: textContent,
@@ -662,7 +923,7 @@ const processInterviewFile = async (filePath, interviewData) => {
         endpointUsed: config.ai.mockMode ? null : process.env.AI_DRAFT_GENERETOR_ENDPOINT_URL
       }
     };
-    
+
   } catch (error) {
     console.error('❌ Error processing interview file:', error);
     throw error;
@@ -694,7 +955,7 @@ const healthCheck = async () => {
       test: true,
       message: 'Health check ping'
     }, 'health');
-    
+
     status.status = 'healthy';
     status.message = 'Real endpoint is accessible';
     status.responseTime = testResult.responseTime || 'unknown';
@@ -741,7 +1002,7 @@ const updateConfig = (newConfig) => {
   if (newConfig.requestTimeout !== undefined) {
     config.ai.requestTimeout = newConfig.requestTimeout;
   }
-  
+
   console.log('🔧 AI Service configuration updated:', getConfig());
   return getConfig();
 };
@@ -762,7 +1023,7 @@ const generateFullLifeStory = async (fullStoryData) => {
   return withRetry(async () => {
     // Determine which endpoint URL to use
     const fullStoryEndpointUrl = process.env.AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL;
-    
+
     if (!fullStoryEndpointUrl) {
       throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
     }
@@ -805,7 +1066,7 @@ const generateFullLifeStory = async (fullStoryData) => {
 
     // Extract and parse AI content from response
     let aiContent = result;
-    
+
     // Handle direct output field (n8n workflow response)
     if (result.output) {
       aiContent = result.output;
@@ -861,7 +1122,7 @@ const generateFullLifeStory = async (fullStoryData) => {
     };
 
     // console.log('📖 NORMALIZED FULL LIFE STORY:', JSON.stringify(normalizedStory, null, 2));
-    
+
     return normalizedStory;
   });
 };
@@ -873,21 +1134,21 @@ const generateFullLifeStory = async (fullStoryData) => {
  */
 const mockGenerateFullLifeStory = (fullStoryData) => {
   console.log('🎭 Mock AI: Generating full life story for session:', fullStoryData.sessionId);
-  
+
   const { clientInfo, approvedDrafts, sessionNotes, totalInterviews, completedInterviews } = fullStoryData;
-  
+
   // Simulate processing time
   const processingTime = Math.floor(Math.random() * 3000) + 2000; // 2-5 seconds
-  
+
   // Aggregate content from all approved drafts
   const allSections = [];
   const allThemes = [];
   const allTranscriptions = [];
   let totalWords = 0;
-  
+
   approvedDrafts.forEach((draft, index) => {
     const draftContent = draft.draft?.content || {};
-    
+
     // Collect sections
     if (draftContent.sections) {
       Object.entries(draftContent.sections).forEach(([key, value]) => {
@@ -898,7 +1159,7 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
         });
       });
     }
-    
+
     // Collect themes
     if (draftContent.keyThemes) {
       allThemes.push(...draftContent.keyThemes.map(theme => ({
@@ -906,7 +1167,7 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
         source: draft.interviewName
       })));
     }
-    
+
     // Collect transcriptions
     if (draft.transcription) {
       allTranscriptions.push({
@@ -915,25 +1176,25 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
         duration: draft.duration
       });
     }
-    
+
     // Count words
     if (draftContent.summary) {
       totalWords += draftContent.summary.split(' ').length;
     }
   });
-  
+
   // Generate comprehensive life story
   const fullLifeStory = {
     title: `The Life Story of ${clientInfo.name}`,
     subtitle: `A Comprehensive Journey Through ${completedInterviews} Life Interviews`,
-    
+
     content: {
       introduction: {
         overview: `This comprehensive life story of ${clientInfo.name} has been carefully crafted from ${approvedDrafts.length} approved interview drafts, representing ${completedInterviews} completed interviews out of ${totalInterviews} total sessions. Through these conversations, we have captured the essence of a remarkable life journey spanning ${clientInfo.age} years.`,
         methodology: `Each interview was professionally conducted, transcribed, and analyzed using advanced AI technology to extract key themes, memorable moments, and significant life events. The approved drafts have been synthesized into this cohesive narrative that honors ${clientInfo.name}'s unique story.`,
         acknowledgments: `Special thanks to all who participated in the interview process and contributed to preserving these precious memories.`
       },
-      
+
       chapters: [
         {
           title: "Early Life and Foundation",
@@ -961,7 +1222,7 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
           sources: approvedDrafts.map(d => d.interviewName)
         }
       ],
-      
+
       appendices: {
         interviewSummary: {
           totalInterviews,
@@ -978,12 +1239,12 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
         keyThemes: [...new Set(allThemes.map(t => t.theme))].slice(0, 10),
         sessionNotes: sessionNotes || 'No additional session notes provided.'
       },
-      
+
       totalWords: totalWords + 2000, // Add estimated words from generated content
       estimatedPages: Math.ceil((totalWords + 2000) / 250),
       generationSummary: `This life story was generated from ${approvedDrafts.length} approved interview drafts, combining AI analysis with human curation to create a comprehensive narrative of ${clientInfo.name}'s remarkable life journey.`
     },
-    
+
     metadata: {
       generatedAt: new Date().toISOString(),
       processingTime,
@@ -996,9 +1257,9 @@ const mockGenerateFullLifeStory = (fullStoryData) => {
       version: '1.0.0'
     }
   };
-  
+
   console.log(`✅ Mock AI: Generated full life story with ${fullLifeStory.content.totalWords} words in ${processingTime}ms`);
-  
+
   return fullLifeStory;
 };
 
@@ -1009,12 +1270,12 @@ module.exports = {
   generateDraft,
   generateFullLifeStory,
   processInterviewFile,
-  
+
   // Utility functions
   healthCheck,
   getConfig,
   updateConfig,
-  
+
   // Internal functions (for testing)
   _internal: {
     callAIEndpoint,

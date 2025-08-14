@@ -354,6 +354,8 @@ class SupabaseService {
    */
   async updateInterviewInSession(sessionId, interviewId, updateData) {
     try {
+      // Updating interview (removed verbose logging)
+      
       // First, try to update the normalized interview in the separate interviews table
       const { data: normalizedInterview, error: normalizedError } = await supabase
         .from('interviews')
@@ -366,9 +368,17 @@ class SupabaseService {
         .select()
         .single();
 
+      // Normalized update result (removed verbose logging)
+
       // If normalized interview exists, return it
       if (!normalizedError && normalizedInterview) {
+        // Successfully updated normalized interview
         return { success: true, data: normalizedInterview };
+      }
+      
+      // Normalized update failed, trying legacy structure...
+      if (normalizedError) {
+        console.error('Normalized update error:', normalizedError);
       }
 
       // If not found in normalized table, try legacy interviews in session preferences
@@ -1028,6 +1038,27 @@ class SupabaseService {
       return { success: true, data };
     } catch (error) {
       console.error('Error creating draft:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update an existing draft
+   */
+  async updateDraft(draftId, updateData) {
+    try {
+      const { data, error } = await supabase
+        .from('drafts')
+        .update(updateData)
+        .eq('id', draftId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error updating draft:', error);
       return { success: false, error: error.message };
     }
   }

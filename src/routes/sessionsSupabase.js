@@ -94,6 +94,13 @@ const upload = multer({
 router.post('/interviews/:id/upload', upload.single('file'), sessionController.uploadInterviewFile);
 
 /**
+ * @route POST /api/sessions-supabase/:sessionId/drafts/:draftId/regenerate
+ * @desc Regenerate an existing draft with additional notes and instructions
+ * @access Admin only
+ */
+router.post('/:sessionId/drafts/:draftId/regenerate', sessionController.regenerateDraft);
+
+/**
  * @route POST /api/admin/sessions/:id/generate-full-story
  * @desc Generate full life story from all session data and approved drafts
  * @access Admin only

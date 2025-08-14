@@ -670,18 +670,34 @@ const uploadInterviewFile = async (req, res) => {
     }
 
     // Step 4: Update interview with file, transcription, and mark as completed
+    // Prepare content object with clean structure
+    const contentUpdate = {
+      ...targetInterview.content,
+      file_upload: fileMetadata,
+      transcription: transcription, // Keep transcription in content for backward compatibility
+      wordCount: calculatedWordCount,
+      fileType: file.mimetype,
+      originalContent: processedContent // Store the original processed content
+    };
+    
+    // Add text content for text files
+    if (!isAudioFile && processedContent) {
+      contentUpdate.text = processedContent;
+    }
+    
+    // Prepare update data with clean structure (no null values)
     const updateData = {
       status: 'completed',
       duration: calculatedDuration,
       notes: targetInterview.notes || '',
-      content: {
-        ...targetInterview.content,
-        file_upload: fileMetadata,
-        transcription: transcription,
-        wordCount: calculatedWordCount
-      },
+      content: contentUpdate,
       completed_date: new Date().toISOString()
     };
+    
+    // Add transcription at root level for audio files only
+    if (isAudioFile && transcription) {
+      updateData.transcription = transcription;
+    }
 
     const result = await supabaseService.updateInterviewInSession(targetSessionId, interviewId, updateData);
 
@@ -719,7 +735,7 @@ const uploadInterviewFile = async (req, res) => {
         organizations: [],
         dates: []
       },
-      categories: generatedDraft.content?.categories || [],
+      notes: targetInterview.notes || [], // Preserve existing notes
       metadata: {
         wordCount: calculatedWordCount,
         generatedAt: new Date().toISOString(),
@@ -1060,6 +1076,188 @@ const getSessionFullStories = async (req, res) => {
   }
 };
 
+/**
+ * Regenerate an existing draft with additional notes and instructions
+ */
+const regenerateDraft = async (req, res) => {
+  try {
+    const { sessionId, draftId } = req.params;
+    const { instructions, notes } = req.body;
+
+    // console.log('Regenerating draft:', { sessionId, draftId, instructions, notes });
+
+    // Step 1: Get the existing draft to understand what interview it's based on
+    const supabase = require('../config/database');
+    const { data: existingDraft, error: draftError } = await supabase
+      .from('drafts')
+      .select('*')
+      .eq('id', draftId)
+      .eq('session_id', sessionId)
+      .single();
+
+    if (draftError || !existingDraft) {
+      return res.status(404).json({
+        success: false,
+        message: 'Draft not found'
+      });
+    }
+
+    // Step 2: Get the source interview data
+    const sourceInterviewId = existingDraft.content?.metadata?.sourceInterview;
+    if (!sourceInterviewId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot regenerate draft: no source interview found'
+      });
+    }
+
+    // Get the interview data
+    const { data: interview, error: interviewError } = await supabase
+      .from('interviews')
+      .select('*')
+      .eq('id', sourceInterviewId)
+      .single();
+
+    if (interviewError || !interview) {
+      return res.status(404).json({
+        success: false,
+        message: 'Source interview not found'
+      });
+    }
+
+    // Step 3: Get the original content (transcription or text)
+    let originalContent = null;
+    
+    // Try multiple locations for content (for backward compatibility)
+    if (interview.transcription) {
+      // Audio transcription at root level
+      originalContent = interview.transcription;
+    } else if (interview.content?.text) {
+      // Text content in content object
+      originalContent = interview.content.text;
+    } else if (interview.content?.transcription) {
+      // Transcription in content object (backward compatibility)
+      originalContent = interview.content.transcription;
+    } else if (interview.content?.originalContent) {
+      // Original processed content
+      originalContent = interview.content.originalContent;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'No content found in source interview for regeneration. Please ensure the interview has uploaded file content.'
+      });
+    }
+
+    // Step 4: Prepare enhanced metadata for regeneration
+    const enhancedMetadata = {
+      id: sourceInterviewId,
+      name: interview.name || `Interview ${sourceInterviewId}`,
+      type: interview.type || 'regenerated_interview',
+      fileType: interview.content?.fileType || 'text/plain',
+      duration: interview.duration || 0,
+      wordCount: interview.content?.wordCount || 0,
+      regenerationType: 'regenerate',
+      previousDraftId: draftId,
+      adminInstructions: instructions || '',
+      adminNotes: notes || [],
+      regeneratedAt: new Date().toISOString()
+    };
+
+    // Step 5: Generate new draft with enhanced context
+    const aiService = require('../services/aiService');
+    const regeneratedDraft = await aiService.generateDraft(originalContent, enhancedMetadata);
+    
+    // AI Generated Draft Structure validation (removed verbose logging)
+
+    // Step 6: Update existing draft instead of creating new version
+    // Preserve existing notes and add regeneration metadata
+    const existingNotes = existingDraft.content?.notes || [];
+    
+    // Ensure the regenerated draft has proper structure
+    const draftContent = {
+      summary: regeneratedDraft.content?.summary || regeneratedDraft.summary || "This interview session captured valuable insights about the subject's life journey.",
+      sections: regeneratedDraft.content?.sections || regeneratedDraft.sections || {
+        introduction: "Based on the interview content, this section introduces the subject and provides context for their life story.",
+        earlyLife: "Early life experiences and memories captured from the interview content.",
+        careerJourney: "Professional journey and career milestones discussed in the interview.",
+        personalRelationships: "Personal relationships and family connections explored during the conversation.",
+        lifeWisdom: "Wisdom and life lessons shared during the interview session.",
+        conclusion: "Summary and reflection on the life story captured through this interview."
+      },
+      keyThemes: regeneratedDraft.content?.keyThemes || regeneratedDraft.keyThemes || [
+        "Personal Growth",
+        "Life Experiences", 
+        "Family and Heritage",
+        "Career Development",
+        "Wisdom and Reflection"
+      ],
+      followUps: regeneratedDraft.content?.followUps.length > 1 ? regeneratedDraft.content?.followUps : regeneratedDraft.content?.followUps.length === 1 ? regeneratedDraft.content?.followUps[0].split('\\n') : [],
+      toVerify: regeneratedDraft.content?.toVerify || {
+        people: [],
+        places: [],
+        organizations: [],
+        dates: []
+      },
+      notes: existingNotes, // Preserve existing notes
+      metadata: {
+        ...existingDraft.content?.metadata,
+        ...regeneratedDraft.metadata,
+        regeneratedFrom: draftId,
+        adminInstructions: instructions,
+        adminNotes: notes,
+        regenerationType: 'admin_regenerate',
+        regeneratedAt: new Date().toISOString(),
+        regenerationCount: (existingDraft.content?.metadata?.regenerationCount || 0) + 1
+      }
+    };
+    
+    // Update existing draft instead of creating new one
+    const draftResult = await supabaseService.updateDraft(draftId, {
+      content: draftContent,
+      stage: 'regenerated'
+    });
+
+
+    if (!draftResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update regenerated draft',
+        error: draftResult.error
+      });
+    }
+
+    // Step 7: Log the regeneration
+    try {
+      await req.logDraftGenerated(sessionId, sourceInterviewId, {
+        ...regeneratedDraft,
+        regenerationType: 'admin_regenerate',
+        previousDraftId: draftId
+      });
+    } catch (logError) {
+      console.error('Failed to log draft regeneration:', logError);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        draft: draftResult.data,
+        previousDraftId: draftId,
+        regenerationType: 'admin_regenerate',
+        version: draftResult.data.version || 1
+      },
+      message: 'Draft regenerated successfully with admin notes and instructions'
+    });
+
+  } catch (error) {
+    console.error('Error regenerating draft:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to regenerate draft',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllSessions,
   getSessionById,
@@ -1073,5 +1271,6 @@ module.exports = {
   uploadInterviewFile,
   deleteInterview,
   generateFullLifeStory,
-  getSessionFullStories
+  getSessionFullStories,
+  regenerateDraft
 };

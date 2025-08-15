@@ -155,6 +155,19 @@ class SupabaseAuthService {
       // Verify our JWT token
       const decoded = jwt.verify(token, config.jwtSecret);
       
+      // Check if token is close to expiring (within 1 hour)
+      const now = Math.floor(Date.now() / 1000);
+      const timeUntilExpiry = decoded.exp - now;
+      
+      if (timeUntilExpiry < 3600) { // Less than 1 hour
+        console.log(`⚠️ Token expiring soon (${Math.floor(timeUntilExpiry / 60)} minutes left)`);
+        return {
+          success: false,
+          error: 'Token expiring soon',
+          needsRefresh: true
+        };
+      }
+      
       // Get fresh user data from database with retry logic
       let userRecord, error;
       let retryCount = 0;
@@ -180,8 +193,8 @@ class SupabaseAuthService {
             break;
           }
           
-          // Wait before retry
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount - 1)));
         }
       }
 
@@ -191,6 +204,16 @@ class SupabaseAuthService {
           error: error?.message, 
           userRecord: !!userRecord 
         });
+        
+        // If it's a network error, suggest token refresh instead of immediate logout
+        if (error?.message?.includes('fetch failed') || error?.message?.includes('network')) {
+          return {
+            success: false,
+            error: 'Network connectivity issue',
+            needsRefresh: true
+          };
+        }
+        
         throw new Error(`User not found: ${decoded.uid}`);
       }
 
@@ -206,6 +229,16 @@ class SupabaseAuthService {
 
     } catch (error) {
       console.error('Token verification error:', error);
+      
+      // Handle JWT expiration specifically
+      if (error.name === 'TokenExpiredError') {
+        return {
+          success: false,
+          error: 'Token expired',
+          needsRefresh: true
+        };
+      }
+      
       return {
         success: false,
         error: error.message

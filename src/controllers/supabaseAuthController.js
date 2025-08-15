@@ -169,6 +169,15 @@ class SupabaseAuthController {
       const result = await supabaseAuthService.verifyToken(token);
 
       if (!result.success) {
+        // Handle token refresh scenarios
+        if (result.needsRefresh) {
+          return res.status(401).json({
+            success: false,
+            message: result.error || 'Token needs refresh',
+            needsRefresh: true
+          });
+        }
+        
         return res.status(401).json({
           success: false,
           message: result.error || 'Invalid token'

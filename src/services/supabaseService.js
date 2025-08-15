@@ -341,7 +341,6 @@ class SupabaseService {
 
       if (error) throw error;
 
-      console.log('Created normalized interview:', createdInterview);
       return { success: true, data: createdInterview };
     } catch (error) {
       console.error('Error adding interview to session:', error);
@@ -678,6 +677,29 @@ class SupabaseService {
    */
   async deleteSession(sessionId) {
     try {
+      // First, delete all drafts for this session
+      const { error: draftDeleteError } = await supabase
+        .from('drafts')
+        .delete()
+        .eq('session_id', sessionId);
+
+      if (draftDeleteError) {
+        console.warn('Error deleting drafts for session:', draftDeleteError);
+        // Continue with deletion even if draft deletion fails
+      }
+
+      // Then, delete all interviews for this session
+      const { error: interviewDeleteError } = await supabase
+        .from('interviews')
+        .delete()
+        .eq('session_id', sessionId);
+
+      if (interviewDeleteError) {
+        console.warn('Error deleting interviews for session:', interviewDeleteError);
+        // Continue with session deletion even if interview deletion fails
+      }
+
+      // Finally, delete the session itself
       const { data, error } = await supabase
         .from('sessions')
         .delete()
@@ -702,7 +724,7 @@ class SupabaseService {
    */
   async deleteInterviewFromSession(interviewId, sessionId) {
     try {
-      // First try to delete from normalized interviews table
+      // First, delete the interview from normalized interviews table
       const { data: deletedInterview, error: normalizedError } = await supabase
         .from('interviews')
         .delete()
@@ -711,9 +733,13 @@ class SupabaseService {
         .select()
         .single();
 
-      // If found and deleted from normalized table, return success
+      // If found and deleted from normalized table, start background draft cleanup and return success
       if (!normalizedError && deletedInterview) {
-        console.log('Deleted normalized interview:', deletedInterview);
+        // Start background draft cleanup (don't await)
+        this.cleanupDraftsForInterview(interviewId, sessionId).catch(error => {
+          console.warn('Background draft cleanup failed:', error);
+        });
+        
         return { success: true, data: deletedInterview };
       }
 
@@ -755,10 +781,67 @@ class SupabaseService {
 
       if (updateError) throw updateError;
 
+      // Start background draft cleanup for legacy deletion too
+      this.cleanupDraftsForInterview(interviewId, sessionId).catch(error => {
+        console.warn('Background draft cleanup failed:', error);
+      });
+      
       return { success: true, data: { id: interviewId, deleted_from: 'legacy' } };
     } catch (error) {
       console.error('Error deleting interview from session:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Background cleanup of drafts associated with an interview
+   */
+  async cleanupDraftsForInterview(interviewId, sessionId) {
+    try {
+      // Find drafts associated with this interview
+      const { data: draftsToDelete, error: findDraftsError } = await supabase
+        .from('drafts')
+        .select('id')
+        .eq('session_id', sessionId);
+
+      if (!findDraftsError && draftsToDelete && draftsToDelete.length > 0) {
+        // Filter drafts that match the interview ID in their metadata
+        const matchingDraftIds = [];
+        
+        for (const draft of draftsToDelete) {
+          try {
+            // Get the full draft to check its content
+            const { data: fullDraft, error: draftError } = await supabase
+              .from('drafts')
+              .select('content')
+              .eq('id', draft.id)
+              .single();
+            
+            if (!draftError && fullDraft?.content?.metadata?.sourceInterview === interviewId) {
+              matchingDraftIds.push(draft.id);
+            }
+          } catch (e) {
+            console.warn('Error checking draft metadata:', e);
+          }
+        }
+        
+        // Delete the matching drafts
+        if (matchingDraftIds.length > 0) {
+          const { error: draftDeleteError } = await supabase
+            .from('drafts')
+            .delete()
+            .in('id', matchingDraftIds);
+          
+          if (draftDeleteError) {
+            console.warn('Error deleting drafts for interview:', draftDeleteError);
+          } else {
+            console.log(`Successfully deleted ${matchingDraftIds.length} draft(s) for interview ${interviewId}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in background draft cleanup:', error);
+      throw error;
     }
   }
 

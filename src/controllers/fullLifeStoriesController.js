@@ -246,11 +246,13 @@ const addNoteToFullLifeStory = async (req, res) => {
 const regenerateFullLifeStory = async (req, res) => {
   try {
     const { id } = req.params;
+    const { regenerationType, includeAllNotes } = req.body;
     const userId = req.user?.id || 'admin';
+    const userName = req.user?.name || req.user?.email || 'Admin User';
 
+    console.log('🔄 Regenerating full life story:', id, { regenerationType, includeAllNotes });
 
-
-    // Get the existing story to get session info
+    // Get the existing story to get session info and notes
     const storyResult = await fullLifeStoriesService.getFullLifeStoryById(id);
     
     if (!storyResult.success) {
@@ -262,24 +264,140 @@ const regenerateFullLifeStory = async (req, res) => {
 
     const story = storyResult.data;
 
-    // For now, we'll simulate regeneration by updating the status
-    // In a real implementation, you'd trigger the AI generation process
-    const updateResult = await fullLifeStoriesService.updateFullLifeStoryStatus(id, {
-      status: 'pending_approval',
-      reason: 'Story regenerated',
-      userId
+    // Check if there are notes to base regeneration on
+    if (!story.review_notes || story.review_notes.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot regenerate without notes or feedback'
+      });
+    }
+
+    // Get session data for regeneration
+    const supabaseService = require('../services/supabaseService');
+    const sessionResult = await supabaseService.getSessionById(story.session_id);
+    
+    if (!sessionResult.success) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found for regeneration'
+      });
+    }
+
+    const session = sessionResult.data;
+    const interviews = session.interviews || [];
+
+    // Get approved drafts for regeneration
+    const approvedDrafts = interviews.filter(interview => {
+      const draft = interview.ai_draft;
+      if (!draft) return false;
+      const stage = draft.metadata?.stage || draft.stage;
+      return stage === 'approved';
     });
 
-    if (updateResult.success) {
+    if (approvedDrafts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No approved drafts found for regeneration'
+      });
+    }
+
+    // Use AI service for regeneration with notes feedback
+    const aiService = require('../services/aiService');
+    console.log('🤖 AI Service: Regenerating full life story with feedback...');
+    
+    const fullStoryData = {
+      sessionId: story.session_id,
+      clientInfo: {
+        name: session.client_name,
+        age: session.client_age,
+        preferences: session.preferences
+      },
+      approvedDrafts: approvedDrafts.map(interview => ({
+        interviewId: interview.id,
+        interviewName: interview.name,
+        draft: interview.ai_draft,
+        transcription: interview.content?.transcription,
+        notes: interview.notes,
+        duration: interview.duration
+      })),
+      sessionNotes: session.notes,
+      totalInterviews: interviews.length,
+      completedInterviews: interviews.filter(i => i.status === 'completed').length,
+      // Add regeneration context
+      regenerationContext: {
+        originalStoryId: story.id,
+        originalVersion: story.version,
+        feedbackNotes: story.review_notes,
+        regenerationType: regenerationType || 'notes_based'
+      }
+    };
+
+    const regeneratedStory = await aiService.generateFullLifeStory(fullStoryData);
+
+    // Create new version with AI-regenerated content
+    const storyData = {
+      sessionId: story.session_id,
+      title: regeneratedStory.title,
+      subtitle: regeneratedStory.subtitle,
+      content: regeneratedStory.content,
+      generatedBy: userName,
+      userId: story.user_id,
+      sourceMetadata: {
+        ...story.source_metadata,
+        regeneratedFrom: story.id,
+        regenerationType: regenerationType || 'notes_based',
+        regenerationNotes: story.review_notes,
+        regenerationDate: new Date().toISOString(),
+        approvedDrafts: approvedDrafts.length,
+        totalInterviews: interviews.length,
+        completedInterviews: interviews.filter(i => i.status === 'completed').length,
+        approvedDraftIds: approvedDrafts.map(d => d.id),
+        sessionData: {
+          clientName: session.client_name,
+          clientAge: session.client_age,
+          sessionStatus: session.status
+        }
+      },
+      generationStats: {
+        processingTime: regeneratedStory.metadata?.processingTime || 0,
+        aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0',
+        sourceInterviews: approvedDrafts.length,
+        totalWords: regeneratedStory.content?.totalWords || 0,
+        estimatedPages: regeneratedStory.content?.estimatedPages || 0,
+        regenerated: true,
+        originalVersion: story.version
+      },
+      totalWords: regeneratedStory.content?.totalWords || 0,
+      processingTime: regeneratedStory.metadata?.processingTime || 0,
+      aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0'
+    };
+
+    const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
+
+    if (regenerationResult.success) {
+      // Add a note to the new version indicating it was regenerated
+      const timestamp = new Date().toISOString();
+      const regenerationNote = `[${timestamp}] ${userName}: Regenerated from version ${story.version} based on feedback`;
+      
+      await fullLifeStoriesService.updateFullLifeStoryReviewNotes(
+        regenerationResult.data.id, 
+        regenerationNote, 
+        userName
+      );
+
       res.json({
         success: true,
-        message: 'Full life story regeneration initiated',
-        data: updateResult.data
+        message: 'Full life story regenerated successfully',
+        data: {
+          newVersion: regenerationResult.data,
+          originalVersion: story,
+          regenerationType: regenerationType || 'notes_based'
+        }
       });
     } else {
       res.status(500).json({
         success: false,
-        error: updateResult.error
+        error: regenerationResult.error
       });
     }
 

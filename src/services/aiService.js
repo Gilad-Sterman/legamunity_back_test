@@ -376,7 +376,8 @@ const generateDraft = async (content, interviewMetadata) => {
         /Follow-ups\*\*:\s*\n((?:\s*\d+\..*?\n?)*)/gi,
         /- \*\*Follow-ups\*\*:\s*\n((?:\s*\d+\..*?\n?)*)/gi,
         /\*\*Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi,
-        /Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi
+        /Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi,
+        /- \*\*Follow-ups\*\*:([\s\S]*?)(?=\*\*[^*]|\n- \*\*|$)/gi
       ];
       
       let followUpMatch = null;
@@ -396,9 +397,9 @@ const generateDraft = async (content, interviewMetadata) => {
         
         // Extract numbered questions with multiple patterns
         const questionPatterns = [
-          /\d+\.\s+([^\n]+?)(?=\n\d+\.|\n\*\*|\n-|$)/g,
-          /\d+\.\s*([^\n\\]+)/g,
-          /\d+\.\s+(.+?)(?=\\\n|\n|$)/g
+          /\s*\d+\.\s+([^\n]+?)(?=\n\s*\d+\.|\n\*\*|\n-|$)/g,
+          /\s*\d+\.\s*([^\n\\]+)/g,
+          /\s*\d+\.\s+(.+?)(?=\\\n|\n|$)/g
         ];
         
         let questions = null;
@@ -421,9 +422,39 @@ const generateDraft = async (content, interviewMetadata) => {
           // Fallback: look for any line that looks like a question
           const lines = followUpText.split(/\\n|\n/);
           lines.forEach(line => {
-            const cleanLine = line.replace(/^\s*\d+\.\s*/, '').trim();
+            // Handle both regular and escaped newlines
+            const normalizedLine = line.replace(/\\n/g, '\n');
+            const cleanLine = normalizedLine.replace(/^\s*\d+\.\s*/, '').trim();
             if (cleanLine.includes('?') && cleanLine.length > 10) {
               followUps.push(cleanLine);
+            }
+          });
+        }
+      } else {
+        // Additional fallback: look for numbered questions anywhere in the text
+        // Handle both regular newlines and escaped newlines
+        const normalizedText = text.replace(/\\n/g, '\n');
+        const globalQuestionPattern = /\s*\d+\.\s+([^\n]*\?[^\n]*)/g;
+        const globalMatches = [...normalizedText.matchAll(globalQuestionPattern)];
+        globalMatches.forEach(match => {
+          const question = match[1].trim();
+          if (question && question.length > 10) {
+            followUps.push(question);
+          }
+        });
+        
+        // If still no matches, try splitting by escaped newlines and look for questions
+        if (followUps.length === 0) {
+          const lines = text.split(/\\n|\n/);
+          lines.forEach(line => {
+            const trimmedLine = line.trim();
+            // Look for numbered questions
+            const questionMatch = trimmedLine.match(/^\s*\d+\.\s+(.+\?.*)/); 
+            if (questionMatch) {
+              const question = questionMatch[1].trim();
+              if (question.length > 10) {
+                followUps.push(question);
+              }
             }
           });
         }
@@ -454,7 +485,8 @@ const generateDraft = async (content, interviewMetadata) => {
         const toVerifyText = toVerifyMatch[0];
         
         // Look for table structure - handle both complete and incomplete tables
-        const tableLines = toVerifyText.split(/\\n|\n/).filter(line => line.includes('|'));
+        const normalizedToVerifyText = toVerifyText.replace(/\\n/g, '\n');
+        const tableLines = normalizedToVerifyText.split('\n').filter(line => line.includes('|'));
         
         if (tableLines.length > 0) {
           // Find header row to understand column structure
@@ -486,9 +518,9 @@ const generateDraft = async (content, interviewMetadata) => {
             const line = tableLines[i];
             if (line.includes('---')) continue; // Skip separator rows
             
-            const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell);
+            const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell && cell.length > 0);
             
-            if (cells.length >= 2) {
+            if (cells.length >= 1) {
               // First approach: try to use column mapping
               if (Object.keys(columnMapping).length > 0) {
                 if (columnMapping.people !== undefined && cells[columnMapping.people]) {
@@ -519,35 +551,80 @@ const generateDraft = async (content, interviewMetadata) => {
                   }
                 }
               } else {
-                // Fallback: assume first column is mixed entities, second is dates
-                const entity = cells[0];
-                const date = cells[1] || '';
-                
-                if (entity && !entity.toLowerCase().includes('people') && !entity.toLowerCase().includes('organizations')) {
-                  // Try to categorize the entity
-                  if (entity.match(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/) || entity.includes('רב')) {
-                    toVerify.people.push({ name: entity, context: 'Mentioned in interview', verified: false });
-                  } else if (entity.match(/University|Academy|ישיבת|School|Company/i)) {
-                    toVerify.organizations.push({ name: entity, context: 'Organization mentioned', verified: false });
-                  } else {
-                    toVerify.places.push({ name: entity, context: 'Location mentioned', verified: false });
+                // Fallback: process each cell as potential entity
+                cells.forEach((cell, index) => {
+                  if (cell && cell.length > 1 && !cell.toLowerCase().includes('people') && !cell.toLowerCase().includes('organizations') && !cell.toLowerCase().includes('places') && !cell.toLowerCase().includes('dates')) {
+                    // Try to categorize the entity
+                    if (cell.includes('רב') || cell.includes('הרב') || cell.match(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/)) {
+                      toVerify.people.push({ name: cell, context: 'Mentioned in interview', verified: false });
+                    } else if (cell.match(/University|Academy|ישיבת|ישיבה|School|Company/i)) {
+                      toVerify.organizations.push({ name: cell, context: 'Organization mentioned', verified: false });
+                    } else if (cell.match(/^[א-ת\s]+$/) || cell.match(/^[A-Za-z\s]+$/)) {
+                      // Hebrew or English text that looks like a place
+                      toVerify.places.push({ name: cell, context: 'Location mentioned', verified: false });
+                    }
                   }
-                }
-                
-                if (date && !date.toLowerCase().includes('dates')) {
-                  toVerify.dates.push({ date: date, context: 'Time period mentioned', verified: false });
-                }
+                });
               }
             }
           }
-        } 
-      } 
+        } else {
+          // Additional fallback: look for entities in simple table format without proper headers
+          const normalizedText = toVerifyText.replace(/\\n/g, '\n');
+          const simpleTableLines = normalizedText.split('\n').filter(line => line.includes('|') && line.trim() !== '');
+          
+          simpleTableLines.forEach(line => {
+            if (!line.includes('---') && !line.toLowerCase().includes('people') && !line.toLowerCase().includes('places') && !line.toLowerCase().includes('organizations')) {
+              const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell && cell.length > 0);
+              
+              cells.forEach(cell => {
+                if (cell && cell.length > 1 && !cell.toLowerCase().includes('dates')) {
+                  // Categorize based on content patterns
+                  if (cell.includes('רב') || cell.includes('הרב') || cell.match(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/)) {
+                    toVerify.people.push({ name: cell, context: 'Mentioned in interview', verified: false });
+                  } else if (cell.match(/University|Academy|Bootcamp|School|High School|ישיבת|ישיבה|תיכון/i)) {
+                    toVerify.organizations.push({ name: cell, context: 'Organization mentioned', verified: false });
+                  } else if (cell.match(/^[א-ת\s]+$/) || cell.match(/^[A-Za-z\s]+$/)) {
+                    toVerify.places.push({ name: cell, context: 'Location mentioned', verified: false });
+                  }
+                }
+              });
+            }
+          });
+        }
+      } else {
+        // Final fallback: look for table data anywhere in the text
+        const normalizedText = text.replace(/\\n/g, '\n');
+        const tableLines = normalizedText.split('\n').filter(line => line.includes('|') && line.trim() !== '');
+        
+        tableLines.forEach(line => {
+          if (!line.includes('---') && !line.toLowerCase().includes('people') && !line.toLowerCase().includes('places') && !line.toLowerCase().includes('organizations')) {
+            const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell && cell.length > 0);
+            
+            cells.forEach(cell => {
+              if (cell && cell.length > 1 && !cell.toLowerCase().includes('dates')) {
+                // Categorize based on content patterns
+                if (cell.includes('רב') || cell.includes('הרב') || cell.match(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/)) {
+                  toVerify.people.push({ name: cell, context: 'Mentioned in interview', verified: false });
+                } else if (cell.match(/University|Academy|Bootcamp|School|High School|ישיבת|ישיבה|תיכון/i)) {
+                  toVerify.organizations.push({ name: cell, context: 'Organization mentioned', verified: false });
+                } else if (cell.match(/^[א-ת\s]+$/) || cell.match(/^[A-Za-z\s]+$/)) {
+                  toVerify.places.push({ name: cell, context: 'Location mentioned', verified: false });
+                }
+              }
+            });
+          }
+        });
+      }
       
       return toVerify;
     };
 
     // Enhanced cleanSectionContent function
     const cleanSectionContent = (text) => {
+      // First normalize escaped newlines
+      text = text.replace(/\\n/g, '\n');
+      
       // Remove the Follow-ups section with multiple patterns
       text = text.replace(/- \*\*Follow-ups\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
       text = text.replace(/\*\*Follow-ups\*\*:[\s\S]*?(?=\n- \*\*|\n\*\*[^*]|$)/gi, '');
@@ -561,6 +638,10 @@ const generateDraft = async (content, interviewMetadata) => {
       text = text.replace(/\*\*Title\*\*:.*?\n/g, '');
       text = text.replace(/- \*\*Keywords\*\*:.*?\n/g, '');
       text = text.replace(/\*\*Keywords\*\*:.*?\n/g, '');
+      
+      // Remove any remaining metadata patterns that might be missed
+      text = text.replace(/\n\s*-\s*\*\*[^*]+\*\*:.*$/gm, '');
+      text = text.replace(/\n\s*\*\*[^*]+\*\*:.*$/gm, '');
       
       return text.trim();
     };

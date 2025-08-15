@@ -689,7 +689,7 @@ const uploadInterviewFile = async (req, res) => {
     const updateData = {
       status: 'completed',
       duration: calculatedDuration,
-      notes: targetInterview.notes || '',
+      notes: Array.isArray(targetInterview.notes) ? targetInterview.notes : (targetInterview.notes ? [targetInterview.notes] : []),
       content: contentUpdate,
       completed_date: new Date().toISOString()
     };
@@ -735,7 +735,7 @@ const uploadInterviewFile = async (req, res) => {
         organizations: [],
         dates: []
       },
-      notes: targetInterview.notes || [], // Preserve existing notes
+      notes: [], // Always start with empty notes array for first drafts from file uploads
       metadata: {
         wordCount: calculatedWordCount,
         generatedAt: new Date().toISOString(),
@@ -1191,7 +1191,7 @@ const regenerateDraft = async (req, res) => {
         "Career Development",
         "Wisdom and Reflection"
       ],
-      followUps: regeneratedDraft.content?.followUps.length > 1 ? regeneratedDraft.content?.followUps : regeneratedDraft.content?.followUps.length === 1 ? regeneratedDraft.content?.followUps[0].split('\\n') : [],
+      followUps: regeneratedDraft.content?.followUps || [],
       toVerify: regeneratedDraft.content?.toVerify || {
         people: [],
         places: [],

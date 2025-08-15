@@ -52,13 +52,41 @@ app.get('/api', (req, res) => {
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Serve React app for specific frontend routes
-const frontendRoutes = ['/', '/login', '/register', '/dashboard', '/admin', '/profile', '/settings'];
+// Serve React app for frontend routes
+const frontendRoutes = [
+  '/', 
+  '/login', 
+  '/register', 
+  '/dashboard', 
+  '/admin', 
+  '/admin/dashboard',
+  '/admin/sessions',
+  '/admin/schedule',
+  '/admin/start-interview',
+  '/admin/live-interview',
+  '/admin/draft-review',
+  '/admin/final-approval',
+  '/admin/users',
+  '/admin/conflicts',
+  '/admin/analytics',
+  '/admin/full-life-stories',
+  '/profile', 
+  '/settings'
+];
 
 frontendRoutes.forEach(route => {
   app.get(route, (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
   });
+});
+
+// Handle any other non-API routes by serving index.html
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
+  } else {
+    next();
+  }
 });
 
 // Error handling middleware

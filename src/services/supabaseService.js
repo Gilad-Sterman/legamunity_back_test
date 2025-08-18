@@ -865,7 +865,7 @@ class SupabaseService {
       const { count: activeSessions, error: activeError } = await supabase
         .from('sessions')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['active', 'in_progress']);
+        .in('status', ['active', 'in_progress', 'scheduled']);
 
       if (activeError) throw activeError;
 
@@ -983,7 +983,8 @@ class SupabaseService {
         // Get total life stories count
         const { count: totalCount, error: totalLifeStoriesError } = await supabase
           .from('full_life_stories')
-          .select('*', { count: 'exact', head: true });
+          .select('*', { count: 'exact', head: true })
+          .eq('is_current_version', true);
 
         if (!totalLifeStoriesError && totalCount !== null) {
           totalLifeStories = totalCount;
@@ -993,7 +994,8 @@ class SupabaseService {
         const { count: generatedCount, error: generatedLifeStoriesError } = await supabase
           .from('full_life_stories')
           .select('*', { count: 'exact', head: true })
-          .eq('status', 'generated');
+          .eq('status', 'generated')
+          .eq('is_current_version', true);
 
         if (!generatedLifeStoriesError && generatedCount !== null) {
           generatedLifeStories = generatedCount;
@@ -1003,7 +1005,8 @@ class SupabaseService {
         const { count: approvedCount, error: approvedLifeStoriesError } = await supabase
           .from('full_life_stories')
           .select('*', { count: 'exact', head: true })
-          .eq('status', 'approved');
+          .eq('status', 'approved')
+          .eq('is_current_version', true);
 
         if (!approvedLifeStoriesError && approvedCount !== null) {
           approvedLifeStories = approvedCount;
@@ -1013,7 +1016,8 @@ class SupabaseService {
         const { data: allLifeStories, error: allLifeStoriesError } = await supabase
           .from('full_life_stories')
           .select('review_notes')
-          .eq('status', 'generated'); // Rejections are stored as 'generated' with review_notes
+          .eq('status', 'generated')
+          .eq('is_current_version', true);// Rejections are stored as 'generated' with review_notes
 
         if (!allLifeStoriesError && allLifeStories && allLifeStories.length > 0) {
           rejectedLifeStories = allLifeStories.filter(story => {

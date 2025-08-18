@@ -111,9 +111,9 @@ const getSessionById = async (req, res) => {
 const createSession = async (req, res) => {
   try {
     const sessionData = req.body;
-
     // Validate required fields
-    const requiredFields = ['client_name', 'client_age', 'session_type', 'preferred_language'];
+    // const requiredFields = ['client_name', 'client_age', 'session_type', 'preferred_language'];
+    const requiredFields = ['client_name', 'client_age'];
     const missingFields = requiredFields.filter(field => !sessionData[field]);
 
     if (missingFields.length > 0) {
@@ -142,14 +142,14 @@ const createSession = async (req, res) => {
     // Create interviews from frontend data in normalized interviews table
     const interviewService = require('../services/interviewService');
     const sessionId = result.data.id;
-    
+
     try {
       // Use interviews from frontend sessionData if provided
       const interviewsToCreate = sessionData.interviews || [];
-      
+
       if (interviewsToCreate.length > 0) {
         console.log(`Creating ${interviewsToCreate.length} interviews from frontend data for session ${sessionId}`);
-        
+
         const createdInterviews = [];
         for (const frontendInterview of interviewsToCreate) {
           // Map frontend interview structure to backend structure
@@ -164,7 +164,7 @@ const createSession = async (req, res) => {
               isFriendInterview: frontendInterview.type === 'friend_verification' || false
             }
           };
-          
+
           const interviewResult = await interviewService.createInterview(sessionId, interviewData);
           if (interviewResult.success) {
             createdInterviews.push(interviewResult.data);
@@ -442,7 +442,7 @@ const getSessionStats = async (req, res) => {
       hint: error.hint || '',
       code: error.code || ''
     });
-    
+
     // Return default stats when network fails
     const defaultStats = {
       success: true,
@@ -464,7 +464,7 @@ const getSessionStats = async (req, res) => {
       },
       message: 'Statistics temporarily unavailable due to connectivity issues'
     };
-    
+
     res.json(defaultStats);
   }
 };
@@ -679,12 +679,14 @@ const uploadInterviewFile = async (req, res) => {
       fileType: file.mimetype,
       originalContent: processedContent // Store the original processed content
     };
-    
+
     // Add text content for text files
     if (!isAudioFile && processedContent) {
       contentUpdate.text = processedContent;
+    } else if (isAudioFile && transcription) {
+      contentUpdate.text = transcription;
     }
-    
+
     // Prepare update data with clean structure (no null values)
     const updateData = {
       status: 'completed',
@@ -693,11 +695,11 @@ const uploadInterviewFile = async (req, res) => {
       content: contentUpdate,
       completed_date: new Date().toISOString()
     };
-    
+
     // Add transcription at root level for audio files only
-    if (isAudioFile && transcription) {
-      updateData.transcription = transcription;
-    }
+    // if (isAudioFile && transcription) {
+    //   updateData.transcription = transcription;
+    // }
 
     const result = await supabaseService.updateInterviewInSession(targetSessionId, interviewId, updateData);
 
@@ -710,24 +712,18 @@ const uploadInterviewFile = async (req, res) => {
     }
 
     // Step 5: Create draft for this specific interview
-    
+
     const draftContent = {
-      summary: generatedDraft.content?.summary || "This interview session captured valuable insights about the subject's life journey through file upload and AI processing.",
+      summary: generatedDraft.content?.summary || "",
       sections: generatedDraft.content?.sections || {
-        introduction: "Based on the uploaded file, this section introduces the subject and provides context for their life story.",
-        earlyLife: "Early life experiences and memories captured from the interview content.",
-        careerJourney: "Professional journey and career milestones discussed in the interview.",
-        personalRelationships: "Personal relationships and family connections explored during the conversation.",
-        lifeWisdom: "Wisdom and life lessons shared during the interview session.",
-        conclusion: "Summary and reflection on the life story captured through this interview."
+        introduction: "",
+        earlyLife: "",
+        careerJourney: "",
+        personalRelationships: "",
+        lifeWisdom: "",
+        conclusion: ""
       },
-      keyThemes: generatedDraft.content?.keyThemes || [
-        "Personal Growth",
-        "Life Experiences", 
-        "Family and Heritage",
-        "Career Development",
-        "Wisdom and Reflection"
-      ],
+      keyThemes: generatedDraft.content?.keyThemes || [],
       followUps: generatedDraft.content?.followUps || [],
       toVerify: generatedDraft.content?.toVerify || {
         people: [],
@@ -744,7 +740,7 @@ const uploadInterviewFile = async (req, res) => {
         estimatedReadingTime: `${Math.ceil(calculatedWordCount / 250)} minutes`,
         fileType: file.mimetype,
         duration: calculatedDuration,
-        aiModel: generatedDraft.metadata?.ai_model || 'simulated'
+        aiModel: generatedDraft.metadata?.aiModel || ''
       }
     };
 
@@ -752,7 +748,7 @@ const uploadInterviewFile = async (req, res) => {
     // First check existing drafts to determine the next version number
     const existingDraftsResult = await supabaseService.getDraftsBySessionId(targetSessionId);
     let nextVersion = 1;
-    
+
     if (existingDraftsResult.success && existingDraftsResult.data.length > 0) {
       const latestDraft = existingDraftsResult.data[0]; // Already sorted by version desc
       nextVersion = latestDraft.version + 1;
@@ -764,7 +760,7 @@ const uploadInterviewFile = async (req, res) => {
       stage: 'first_draft',
       content: draftContent
     };
-    
+
     const draftResult = await supabaseService.createDraft(draftData);
 
     if (!draftResult.success) {
@@ -775,7 +771,7 @@ const uploadInterviewFile = async (req, res) => {
 
     // Log file upload
     await req.logFileUploaded(targetSessionId, interviewId, fileMetadata);
-    
+
     // Log draft generation
     if (generatedDraft) {
       await req.logDraftGenerated(targetSessionId, interviewId, generatedDraft);
@@ -810,10 +806,10 @@ const _getFileDuration = (file) => {
   const avgBitrate = 128; // kbps for typical audio
   const fileSizeKB = file.size / 1024;
   const estimatedDurationSeconds = (fileSizeKB * 8) / avgBitrate;
-  
+
   // Convert to minutes and add some realistic variation
   const durationMinutes = Math.max(1, Math.round(estimatedDurationSeconds / 60));
-  
+
   // Cap at reasonable interview length (max 3 hours)
   return Math.min(durationMinutes, 180);
 };
@@ -824,14 +820,14 @@ const _getEstimatedReadingDuration = (text) => {
   const wordsPerMinute = 225;
   const wordCount = _getFileWordCount(text);
   const estimatedMinutes = Math.max(1, Math.round(wordCount / wordsPerMinute));
-  
+
   // Cap at reasonable reading time (max 2 hours)
   return Math.min(estimatedMinutes, 120);
 };
 
 const _getFileWordCount = (text) => {
   if (!text || typeof text !== 'string') return 0;
-  
+
   // Clean the text and split by whitespace
   const words = text.trim().split(/\s+/).filter(word => word.length > 0);
   return words.length;
@@ -913,7 +909,7 @@ const generateFullLifeStory = async (req, res) => {
     const approvedDrafts = interviews.filter(interview => {
       const draft = interview.ai_draft;
       if (!draft) return false;
-      
+
       // Only consider explicitly approved drafts
       const stage = draft.metadata?.stage || draft.stage;
       return stage === 'approved';
@@ -929,7 +925,7 @@ const generateFullLifeStory = async (req, res) => {
     // Step 3: Generate full life story using AI service
     const aiService = require('../services/aiService');
     console.log('🤖 Generating full life story for session:', sessionId);
-    
+
     const fullStoryData = {
       sessionId,
       clientInfo: {
@@ -954,7 +950,7 @@ const generateFullLifeStory = async (req, res) => {
 
     // Step 4: Save to dedicated full_life_stories table
     const fullLifeStoriesService = require('../services/fullLifeStoriesService');
-    
+
     const storyData = {
       sessionId,
       title: fullLifeStory.title,
@@ -987,7 +983,7 @@ const generateFullLifeStory = async (req, res) => {
     };
 
     const saveResult = await fullLifeStoriesService.createFullLifeStory(storyData);
-    
+
     if (!saveResult.success) {
       console.error('Failed to save full life story to database:', saveResult.error);
       return res.status(500).json({
@@ -1127,7 +1123,7 @@ const regenerateDraft = async (req, res) => {
 
     // Step 3: Get the original content (transcription or text)
     let originalContent = null;
-    
+
     // Try multiple locations for content (for backward compatibility)
     if (interview.transcription) {
       // Audio transcription at root level
@@ -1166,13 +1162,13 @@ const regenerateDraft = async (req, res) => {
     // Step 5: Generate new draft with enhanced context
     const aiService = require('../services/aiService');
     const regeneratedDraft = await aiService.generateDraft(originalContent, enhancedMetadata);
-    
+
     // AI Generated Draft Structure validation (removed verbose logging)
 
     // Step 6: Update existing draft instead of creating new version
     // Preserve existing notes and add regeneration metadata
     const existingNotes = existingDraft.content?.notes || [];
-    
+
     // Ensure the regenerated draft has proper structure
     const draftContent = {
       summary: regeneratedDraft.content?.summary || regeneratedDraft.summary || "This interview session captured valuable insights about the subject's life journey.",
@@ -1186,7 +1182,7 @@ const regenerateDraft = async (req, res) => {
       },
       keyThemes: regeneratedDraft.content?.keyThemes || regeneratedDraft.keyThemes || [
         "Personal Growth",
-        "Life Experiences", 
+        "Life Experiences",
         "Family and Heritage",
         "Career Development",
         "Wisdom and Reflection"
@@ -1210,7 +1206,7 @@ const regenerateDraft = async (req, res) => {
         regenerationCount: (existingDraft.content?.metadata?.regenerationCount || 0) + 1
       }
     };
-    
+
     // Update existing draft instead of creating new one
     const draftResult = await supabaseService.updateDraft(draftId, {
       content: draftContent,

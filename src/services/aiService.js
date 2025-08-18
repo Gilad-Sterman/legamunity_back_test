@@ -1181,13 +1181,108 @@ const generateFullLifeStory = async (fullStoryData) => {
     // console.log(`✅ AI Service: Full life story generated in ${processingTime}ms`);
 
     // Normalize the response structure
+    
+    // Extract title from markdown if content is a string with markdown headers
+    let extractedTitle = 'Generated Life Story';
+    let extractedChapters = [];
+    let extractedThemes = [];
+    
+    if (typeof aiContent === 'string') {
+      // Extract title from first markdown header (# Title)
+      const titleMatch = aiContent.match(/^\s*#\s+(.+?)\s*$/m);
+      if (titleMatch && titleMatch[1]) {
+        extractedTitle = titleMatch[1].trim();
+      }
+      
+      // Extract chapters from markdown (## Chapter)
+      // Use a more robust regex that handles multiline content between chapters
+      // This improved pattern ensures we capture all content between chapter headers
+      // and handles various markdown formatting styles
+      const chapterRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
+      const chapterMatches = [...aiContent.matchAll(chapterRegex)];
+      if (chapterMatches) {
+        for (const match of chapterMatches) {
+          if (match[1] && match[2]) {
+            extractedChapters.push({
+              title: match[1].trim(),
+              content: match[2].trim()
+            });
+          }
+        }
+      }
+      
+      // Extract potential themes from content
+      // Look for common theme indicators in the text - both English and Hebrew
+      extractedThemes = [];
+      const themeIndicators = [
+        // English themes
+        'childhood', 'family', 'career', 'education', 'relationships', 'achievements', 
+        'challenges', 'travel', 'hobbies', 'community', 'immigration', 'military', 
+        'parenthood', 'wisdom', 'lessons', 'heritage', 'culture', 'religion', 'spirituality',
+        // Hebrew themes
+        'ילדות', 'משפחה', 'קריירה', 'חינוך', 'לימודים', 'יחסים', 'הישגים',
+        'אתגרים', 'נסיעות', 'תחביבים', 'קהילה', 'עלייה', 'הגירה', 'צבא',
+        'הורות', 'חוכמה', 'לקחים', 'מורשת', 'תרבות', 'דת', 'רוחניות',
+        // Additional context-specific themes
+        'הונגריה', 'ישראל', 'מדריך', 'נוער', 'טכנולוגיה', 'פיתוח', 'תיכון', 'ישיבה'
+      ];
+      
+      themeIndicators.forEach(theme => {
+        // Check for theme in content with appropriate word boundaries
+        // For Hebrew text, we need a different approach as \b doesn't work well with Hebrew
+        let themeRegex;
+        
+        // Check if theme contains Hebrew characters
+        if (/[\u0590-\u05FF]/.test(theme)) {
+          // For Hebrew, use simple string matching with escaping special regex characters
+          const escapedTheme = theme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // Use a simpler approach that avoids character class issues
+          // Create a simpler regex pattern with properly escaped special characters
+          // Use a very simple pattern to avoid any regex issues
+          themeRegex = new RegExp('(^| )' + escapedTheme + '($| |\\.|,|:|;|\\?|!)', 'i');
+        } else {
+          // For English, use standard word boundaries
+          themeRegex = new RegExp(`\\b${theme}\\b`, 'i');
+        }
+        
+        if (themeRegex.test(aiContent)) {
+          extractedThemes.push(theme);
+        }
+      });
+      
+      // Also check chapter titles for themes
+      extractedChapters.forEach(chapter => {
+        themeIndicators.forEach(theme => {
+          // Use the same improved regex pattern for chapter titles
+          let themeRegex;
+          
+          // Check if theme contains Hebrew characters
+          if (/[\u0590-\u05FF]/.test(theme)) {
+            // For Hebrew, use simple string matching with escaping special regex characters
+            const escapedTheme = theme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Use a simpler approach that avoids character class issues
+            // Create a simpler regex pattern with properly escaped special characters
+            // Use a very simple pattern to avoid any regex issues
+            themeRegex = new RegExp('(^| )' + escapedTheme + '($| |\\.|,|:|;|\\?|!)', 'i');
+          } else {
+            // For English, use standard word boundaries
+            themeRegex = new RegExp(`\\b${theme}\\b`, 'i');
+          }
+          
+          if (themeRegex.test(chapter.title) && !extractedThemes.includes(theme)) {
+            extractedThemes.push(theme);
+          }
+        });
+      });
+    }
+    
     const normalizedStory = {
-      title: aiContent.title || aiContent.storyTitle || 'Generated Life Story',
+      title: aiContent.title || aiContent.storyTitle || extractedTitle,
       content: aiContent.content || aiContent.story || aiContent,
-      chapters: aiContent.chapters || [],
+      chapters: aiContent.chapters || extractedChapters || [],
       timeline: aiContent.timeline || [],
       keyMoments: aiContent.keyMoments || aiContent.highlights || [],
-      themes: aiContent.themes || aiContent.keyThemes || [],
+      themes: aiContent.themes || aiContent.keyThemes || extractedThemes || [],
       status: 'generated',
       version: 1,
       metadata: {
@@ -1201,9 +1296,7 @@ const generateFullLifeStory = async (fullStoryData) => {
         completedInterviews: fullStoryData.completedInterviews || 0
       }
     };
-
-    // console.log('📖 NORMALIZED FULL LIFE STORY:', JSON.stringify(normalizedStory, null, 2));
-
+    
     return normalizedStory;
   });
 };

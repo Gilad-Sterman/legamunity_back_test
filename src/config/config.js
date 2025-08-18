@@ -34,7 +34,7 @@ module.exports = {
     requestTimeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 60000, // 60 seconds
     
     // Retry configuration
-    maxRetries: parseInt(process.env.AI_MAX_RETRIES) || 3,
+    maxRetries: parseInt(process.env.AI_MAX_RETRIES) || 2,
     retryDelay: parseInt(process.env.AI_RETRY_DELAY) || 2000, // 2 seconds
   }
 };

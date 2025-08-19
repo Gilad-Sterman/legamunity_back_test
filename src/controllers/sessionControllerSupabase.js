@@ -618,8 +618,8 @@ const uploadInterviewFile = async (req, res) => {
       wordCount: calculatedWordCount,
     };
 
-    console.log('Interview metadata:', interviewMetadata);
-    console.log('Interview processed content:', processedContent);
+    // console.log('Interview metadata:', interviewMetadata);
+    // console.log('Interview processed content:', processedContent);
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
 

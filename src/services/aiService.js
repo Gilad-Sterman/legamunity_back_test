@@ -92,8 +92,8 @@ const callAIEndpoint = async (payload, operation) => {
  * @returns {Promise<Object>} - AI service response
  */
 const uploadFileToAI = async (file, filePath, operation, metadata = {}) => {
-  if (!config.ai.endpointUrl) {
-    throw new Error('AI_ENDPOINT_URL not configured');
+  if (config.ai.mockMode) {
+    return mockTranscribeAudio(filePath);
   }
 
   console.log('🚀 Calling real AI audio transcription endpoint...');

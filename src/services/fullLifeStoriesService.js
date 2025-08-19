@@ -23,7 +23,7 @@ const createFullLifeStory = async (storyData) => {
       generationStats,
       totalWords,
       processingTime,
-      aiModel = 'mock-ai-v1.0'
+      aiModel
     } = storyData;
 
     console.log('📚 Creating full life story for session:', sessionId);
@@ -301,7 +301,7 @@ const updateFullLifeStoryReviewNotes = async (storyId, reviewNotes, reviewedBy) 
     const { data, error } = await supabase
       .from('full_life_stories')
       .update({
-        review_notes: reviewNotes,
+        review_notes: [],
         reviewed_by: reviewedBy,
         reviewed_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

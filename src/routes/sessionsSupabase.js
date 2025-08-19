@@ -78,10 +78,12 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     // Allow audio and text files
     const allowedTypes = [
-      'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac',
+      'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/3gp', 'audio/m4a','audio/x-m4a', 'audio/3gpp', 'audio/3gpp2', 'audio/flac',
       'text/plain', 'text/markdown', 'application/pdf', 'application/msword', 
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ];
+
+    console.log('File type:', file.mimetype);
     
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);

@@ -583,17 +583,20 @@ const uploadInterviewFile = async (req, res) => {
     };
 
     // Determine file type
-    const audioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac'];
+    const audioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4','audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac', 'audio/m4a'];
     const isAudioFile = audioTypes.includes(file.mimetype);
 
     let transcription = null;
     let processedContent = null;
 
+    console.log('Is audio file:', isAudioFile);
+    // return
     // Step 1: Process file based on type (simplified workflow - no processText stage)
     if (isAudioFile) {
       // For audio files, we simulate using the file path (in real implementation, this would be the actual file path)
       const mockFilePath = `uploads/interviews/${interviewId}/${file.originalname}`;
-      transcription = await aiService.transcribeAudio(mockFilePath);
+      // transcription = await aiService.transcribeAudio(mockFilePath);
+      transcription = await aiService.transcribeAudio(file, mockFilePath);
       processedContent = transcription;
     } else {
       // For text files, read content directly without processText stage
@@ -614,6 +617,9 @@ const uploadInterviewFile = async (req, res) => {
       duration: calculatedDuration,
       wordCount: calculatedWordCount,
     };
+
+    console.log('Interview metadata:', interviewMetadata);
+    console.log('Interview processed content:', processedContent);
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);
 
@@ -892,7 +898,9 @@ const deleteInterview = async (req, res) => {
 const generateFullLifeStory = async (req, res) => {
   try {
     const { id: sessionId } = req.params;
+    // const notes = req.body.notes;
 
+    // console.log('🤖 Full life story notes:', notes);
     // Step 1: Get session with all interviews and drafts
     const sessionResult = await supabaseService.getSessionById(sessionId);
     if (!sessionResult.success) {
@@ -942,9 +950,12 @@ const generateFullLifeStory = async (req, res) => {
         duration: interview.duration
       })),
       sessionNotes: session.notes,
+      // notes,
       totalInterviews: interviews.length,
       completedInterviews: interviews.filter(i => i.status === 'completed').length
     };
+
+    // console.log('🤖 Full life story data:', fullStoryData);
 
     const fullLifeStory = await aiService.generateFullLifeStory(fullStoryData);
 
@@ -1080,8 +1091,6 @@ const regenerateDraft = async (req, res) => {
     const { sessionId, draftId } = req.params;
     const { instructions, notes } = req.body;
 
-    // console.log('Regenerating draft:', { sessionId, draftId, instructions, notes });
-
     // Step 1: Get the existing draft to understand what interview it's based on
     const supabase = require('../config/database');
     const { data: existingDraft, error: draftError } = await supabase
@@ -1121,6 +1130,20 @@ const regenerateDraft = async (req, res) => {
       });
     }
 
+    // get the source session info 
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
     // Step 3: Get the original content (transcription or text)
     let originalContent = null;
 
@@ -1144,6 +1167,16 @@ const regenerateDraft = async (req, res) => {
       });
     }
 
+    // if notes length is more than 1, set notes to the last note
+    let oneNote = [];
+    if (interview.notes.length > 1) {
+      oneNote = notes[notes.length - 1];
+      oneNote.content = notes.map(note => note.content).join('\n');
+    } else {
+      oneNote = notes;
+    }
+    
+
     // Step 4: Prepare enhanced metadata for regeneration
     const enhancedMetadata = {
       id: sourceInterviewId,
@@ -1155,7 +1188,9 @@ const regenerateDraft = async (req, res) => {
       regenerationType: 'regenerate',
       previousDraftId: draftId,
       adminInstructions: instructions || '',
-      adminNotes: notes || [],
+      notes: oneNote || [],
+      preferred_language: session.preferences.preferred_language,
+      client_name: session.client_name,
       regeneratedAt: new Date().toISOString()
     };
 
@@ -1167,7 +1202,7 @@ const regenerateDraft = async (req, res) => {
 
     // Step 6: Update existing draft instead of creating new version
     // Preserve existing notes and add regeneration metadata
-    const existingNotes = existingDraft.content?.notes || [];
+    // const existingNotes = existingDraft.content?.notes || [];
 
     // Ensure the regenerated draft has proper structure
     const draftContent = {
@@ -1194,7 +1229,7 @@ const regenerateDraft = async (req, res) => {
         organizations: [],
         dates: []
       },
-      notes: existingNotes, // Preserve existing notes
+      notes: [], // Dont Preserve existing notes
       metadata: {
         ...existingDraft.content?.metadata,
         ...regeneratedDraft.metadata,

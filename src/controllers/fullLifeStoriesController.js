@@ -131,7 +131,7 @@ const updateFullLifeStoryStatus = async (req, res) => {
     // Check if this is a rejection - we'll handle it specially since DB doesn't support 'rejected' status
     const isRejection = status === 'rejected';
     const actualStatus = isRejection ? 'generated' : status; // Keep as 'generated' for rejections
-    
+
     if (!status || !['approved', 'rejected', 'generated', 'archived'].includes(status)) {
       return res.status(400).json({
         success: false,
@@ -189,7 +189,7 @@ const addNoteToFullLifeStory = async (req, res) => {
 
     // Get the existing story first
     const storyResult = await fullLifeStoriesService.getFullLifeStoryById(id);
-    
+
     if (!storyResult.success) {
       return res.status(404).json({
         success: false,
@@ -205,7 +205,7 @@ const addNoteToFullLifeStory = async (req, res) => {
 
     // Update the story in database
     const updateResult = await fullLifeStoriesService.updateFullLifeStoryReviewNotes(id, updatedNotes, userName);
-    
+
     if (!updateResult.success) {
       return res.status(500).json({
         success: false,
@@ -246,15 +246,26 @@ const addNoteToFullLifeStory = async (req, res) => {
 const regenerateFullLifeStory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { regenerationType, includeAllNotes } = req.body;
+    const { regenerationType, includeAllNotes, notes } = req.body;
     const userId = req.user?.id || 'admin';
     const userName = req.user?.name || req.user?.email || 'Admin User';
 
-    console.log('🔄 Regenerating full life story:', id, { regenerationType, includeAllNotes });
-
+    // if notes length is bigger than 1, turn all txt into one string
+    let myNote = {}
+    if (notes.length > 1) {
+      myNote = {
+        id: notes[0].id,
+        createdAt: new Date().toISOString(),
+        text: notes.map(note => note.text).join('\n'),
+        author: userName,
+        userId
+      }
+    } else {
+      myNote = notes[0];
+    }
     // Get the existing story to get session info and notes
     const storyResult = await fullLifeStoriesService.getFullLifeStoryById(id);
-    
+
     if (!storyResult.success) {
       return res.status(404).json({
         success: false,
@@ -275,7 +286,7 @@ const regenerateFullLifeStory = async (req, res) => {
     // Get session data for regeneration
     const supabaseService = require('../services/supabaseService');
     const sessionResult = await supabaseService.getSessionById(story.session_id);
-    
+
     if (!sessionResult.success) {
       return res.status(404).json({
         success: false,
@@ -304,7 +315,7 @@ const regenerateFullLifeStory = async (req, res) => {
     // Use AI service for regeneration with notes feedback
     const aiService = require('../services/aiService');
     console.log('🤖 AI Service: Regenerating full life story with feedback...');
-    
+
     const fullStoryData = {
       sessionId: story.session_id,
       clientInfo: {
@@ -321,6 +332,7 @@ const regenerateFullLifeStory = async (req, res) => {
         duration: interview.duration
       })),
       sessionNotes: session.notes,
+      notes: myNote,
       totalInterviews: interviews.length,
       completedInterviews: interviews.filter(i => i.status === 'completed').length,
       // Add regeneration context
@@ -375,15 +387,6 @@ const regenerateFullLifeStory = async (req, res) => {
     const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
 
     if (regenerationResult.success) {
-      // Add a note to the new version indicating it was regenerated
-      const timestamp = new Date().toISOString();
-      const regenerationNote = `[${timestamp}] ${userName}: Regenerated from version ${story.version} based on feedback`;
-      
-      await fullLifeStoriesService.updateFullLifeStoryReviewNotes(
-        regenerationResult.data.id, 
-        regenerationNote, 
-        userName
-      );
 
       res.json({
         success: true,

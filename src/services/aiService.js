@@ -91,13 +91,12 @@ const callAIEndpoint = async (payload, operation) => {
  * @param {Object} metadata - Additional metadata
  * @returns {Promise<Object>} - AI service response
  */
-const uploadFileToAI = async (file, filePath, operation, metadata = {}) => {
+const uploadFileToAI = async (fileUrl, filePath, operation, metadata = {}) => {
   if (config.ai.mockMode) {
     return mockTranscribeAudio(filePath);
   }
 
-  console.log('🚀 Calling real AI audio transcription endpoint...');
-  const mockFileUrl = `https://res.cloudinary.com/dollaguij/video/upload/v1755613453/herzog-audio5_r2b6m7.mp3`;
+  console.log(`🚀 Calling real AI audio transcription endpoint... fileUrl: ${fileUrl}`);
 
   // Use the specific AI_DRAFT_GENERETOR_ENDPOINT_URL for draft generation
   const audioTranscriptionEndpointUrl = process.env.AI_UPLOAD_RECORDINGS_ENDPOINT_URL;
@@ -108,7 +107,7 @@ const uploadFileToAI = async (file, filePath, operation, metadata = {}) => {
 
   const payload = {
     // file,
-    fileUrl: mockFileUrl,
+    fileUrl,
     operation,
     metadata
   };
@@ -189,13 +188,13 @@ This transcription would be much longer and contain the actual spoken content fr
  * @param {string} audioFilePath - Path to the audio file
  * @returns {Promise<string>} - Transcribed text
  */
-const transcribeAudio = async (file, audioFilePath) => {
+const transcribeAudio = async (fileUrl, audioFilePath) => {
   if (config.ai.mockMode) {
     return mockTranscribeAudio(audioFilePath);
   }
 
   return withRetry(async () => {
-    const result = await uploadFileToAI(file, audioFilePath, 'transcribe', {
+    const result = await uploadFileToAI(fileUrl, audioFilePath, 'transcribe', {
       fileType: 'audio',
       language: 'auto-detect', // or specific language code
     });

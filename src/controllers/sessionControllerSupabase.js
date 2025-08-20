@@ -568,23 +568,38 @@ const uploadInterviewFile = async (req, res) => {
       });
     }
 
-    // Import AI service
+    // Import AI service and Cloudinary service
     const aiService = require('../services/aiService');
-
-    // Simulate file upload (in real implementation, this would upload to Supabase Storage)
-    const fileMetadata = {
-      originalName: file.originalname,
-      fileName: `interview_${interviewId}_${Date.now()}_${file.originalname}`,
-      fileSize: file.size,
-      mimeType: file.mimetype,
-      uploadedAt: new Date().toISOString(),
-      uploadedBy: req.user.uid,
-      storageUrl: `https://mock-storage.supabase.co/storage/v1/object/interviews/${interviewId}/${file.originalname}` // Mock URL
-    };
+    const cloudinaryService = require('../services/cloudinaryService');
 
     // Determine file type
     const audioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4','audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac', 'audio/m4a'];
     const isAudioFile = audioTypes.includes(file.mimetype);
+    const fileType = isAudioFile ? 'audio' : 'text';
+    
+    // Upload file to Cloudinary
+    const uploadResult = await cloudinaryService.uploadFile(file, interviewId, fileType);
+    
+    console.log('Upload result:', uploadResult);
+
+    if (!uploadResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload file to cloud storage',
+        error: uploadResult.error
+      });
+    }
+    
+    // Get file metadata from upload result
+    const fileMetadata = {
+      originalName: uploadResult.data.original_filename,
+      fileName: uploadResult.data.cloudinary_public_id,
+      fileSize: uploadResult.data.file_size,
+      mimeType: uploadResult.data.mime_type,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: req.user?.uid || 'system',
+      storageUrl: uploadResult.data.cloudinary_url
+    };
 
     let transcription = null;
     let processedContent = null;
@@ -596,7 +611,7 @@ const uploadInterviewFile = async (req, res) => {
       // For audio files, we simulate using the file path (in real implementation, this would be the actual file path)
       const mockFilePath = `uploads/interviews/${interviewId}/${file.originalname}`;
       // transcription = await aiService.transcribeAudio(mockFilePath);
-      transcription = await aiService.transcribeAudio(file, mockFilePath);
+      transcription = await aiService.transcribeAudio(fileMetadata.storageUrl, mockFilePath);
       processedContent = transcription;
     } else {
       // For text files, read content directly without processText stage
@@ -775,12 +790,31 @@ const uploadInterviewFile = async (req, res) => {
       // The interview was already updated successfully
     }
 
-    // Log file upload
+    // Log file upload with Cloudinary URL
     await req.logFileUploaded(targetSessionId, interviewId, fileMetadata);
 
     // Log draft generation
     if (generatedDraft) {
       await req.logDraftGenerated(targetSessionId, interviewId, generatedDraft);
+    }
+    
+    // Log Cloudinary file URL to database
+    try {
+      const { data: fileUrlData, error: fileUrlError } = await supabase
+        .from('file_urls')
+        .select('*')
+        .eq('interview_id', interviewId)
+        .single();
+        
+      if (fileUrlError && fileUrlError.code !== 'PGRST116') {
+        console.error('Error checking file_urls:', fileUrlError);
+      }
+      
+      // Log successful Cloudinary integration
+      console.log('File successfully uploaded to Cloudinary:', fileMetadata.storageUrl);
+    } catch (fileUrlError) {
+      console.error('Error checking file_urls table:', fileUrlError);
+      // Don't fail the entire process if this check fails
     }
 
     res.json({

@@ -24,8 +24,30 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(helmet()); // Security headers
-app.use(cors()); // Enable CORS
+app.use(helmet({
+  crossOriginOpenerPolicy: false, // Disable COOP for HTTP
+  crossOriginEmbedderPolicy: false, // Disable COEP for HTTP
+  originAgentCluster: false, // Disable Origin-Agent-Cluster header
+})); // Security headers with HTTP compatibility
+
+// CORS configuration
+const corsOrigins = process.env.CORS_ORIGINS 
+  ? process.env.CORS_ORIGINS.split(',')
+  : [
+      'http://localhost:3000',
+      'http://localhost:5000', 
+      'http://3.78.231.36', // Your EC2 public IP
+      'http://3.78.231.36:3000',
+      'http://3.78.231.36:5000'
+    ];
+
+app.use(cors({
+  origin: corsOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+})); // Enable CORS with configurable origins
+
 app.use(morgan('dev')); // HTTP request logging
 app.use(express.json()); // Parse JSON bodies
 

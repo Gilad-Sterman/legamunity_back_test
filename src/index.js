@@ -49,7 +49,8 @@ app.use(cors({
 })); // Enable CORS with configurable origins
 
 app.use(morgan('dev')); // HTTP request logging
-app.use(express.json()); // Parse JSON bodies
+app.use(express.json({ limit: '50mb' })); // Parse JSON bodies with larger limit
+app.use(express.urlencoded({ limit: '50mb', extended: true })); // Parse URL-encoded bodies
 
 // Custom logging middleware
 app.use(loggingMiddleware); // Add logging helpers to requests
@@ -123,8 +124,13 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Set server timeout to 5 minutes for AI processing
+server.timeout = 300000; // 5 minutes
+server.keepAliveTimeout = 300000; // 5 minutes
+server.headersTimeout = 310000; // Slightly higher than keepAliveTimeout
 
 module.exports = app;

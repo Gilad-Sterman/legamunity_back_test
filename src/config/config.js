@@ -31,7 +31,7 @@ module.exports = {
     mockMode: false,
     
     // Request timeout in milliseconds
-    requestTimeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 60000, // 60 seconds
+    requestTimeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 240000, // 60 seconds
     
     // Retry configuration
     maxRetries: parseInt(process.env.AI_MAX_RETRIES) || 2,

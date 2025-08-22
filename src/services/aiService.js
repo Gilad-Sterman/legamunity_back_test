@@ -106,7 +106,8 @@ const uploadFileToAI = async (fileUrl, filePath, operation, metadata = {}) => {
     throw new Error('AI_UPLOAD_RECORDINGS_ENDPOINT_URL is not configured');
   }
 
-  const timeoutMs = parseInt(process.env.AI_REQUEST_TIMEOUT) || 240000;
+  // Increase timeout for large audio files (10 minutes default instead of 4 minutes)
+  const timeoutMs = parseInt(process.env.AI_REQUEST_TIMEOUT) || 600000;
 
   const payload = {
     fileUrl,
@@ -133,11 +134,18 @@ const uploadFileToAI = async (fileUrl, filePath, operation, metadata = {}) => {
     return response.data;
   } catch (error) {
     const elapsedTime = Date.now() - startTime;
-    console.error(`❌ Audio transcription failed after ${elapsedTime}ms:`, error.message);
+    console.error(`❌ Audio transcription failed after ${elapsedTime}ms: ${error.message}`);
     if (error.code === 'ECONNABORTED') {
       console.error('🕐 Transcription request timed out - Audio processing took longer than expected');
+    } else if (error.response) {
+      // Log only essential response error information
+      console.error(`Response error: Status ${error.response.status} - ${error.response.statusText}`);
     }
-    throw error;
+    // Create a cleaner error object with just the essential information
+    const cleanError = new Error(`Audio transcription failed: ${error.message}`);
+    cleanError.code = error.code;
+    cleanError.status = error.response?.status;
+    throw cleanError;
   }
 };
 
@@ -331,7 +339,7 @@ const generateDraft = async (content, interviewMetadata) => {
           'Content-Type': 'application/json',
           ...(process.env.AI_API_KEY && { 'Authorization': `Bearer ${process.env.AI_API_KEY}` })
         },
-        timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 240000
+        timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 600000 // Increased to 10 minutes default
       });
 
       const elapsedTime = Date.now() - startTime;
@@ -339,11 +347,18 @@ const generateDraft = async (content, interviewMetadata) => {
       result = response.data;
     } catch (error) {
       const elapsedTime = Date.now() - startTime;
-      console.error(`❌ AI request failed after ${elapsedTime}ms:`, error.message);
+      console.error(`❌ AI request failed after ${elapsedTime}ms: ${error.message}`);
       if (error.code === 'ECONNABORTED') {
-        console.error(' Request timed out - AI processing took longer than expected');
+        console.error('🕐 Request timed out - AI processing took longer than expected');
+      } else if (error.response) {
+        // Log only essential response error information
+        console.error(`Response error: Status ${error.response.status} - ${error.response.statusText}`);
       }
-      throw error;
+      // Create a cleaner error object with just the essential information
+      const cleanError = new Error(`AI draft generation failed: ${error.message}`);
+      cleanError.code = error.code;
+      cleanError.status = error.response?.status;
+      throw cleanError;
     }
 
     // Extract the actual AI content

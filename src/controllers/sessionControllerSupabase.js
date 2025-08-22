@@ -560,6 +560,7 @@ const uploadInterviewFile = async (req, res) => {
   try {
     const { id: interviewId } = req.params;
     const file = req.file; // Assuming multer middleware for file handling
+    const sessionData = JSON.parse(req.body.sessionData);
 
     if (!file) {
       return res.status(400).json({
@@ -580,7 +581,7 @@ const uploadInterviewFile = async (req, res) => {
     // Upload file to Cloudinary
     const uploadResult = await cloudinaryService.uploadFile(file, interviewId, fileType);
     
-    console.log('Upload result:', uploadResult);
+    // console.log('Upload result:', uploadResult);
 
     if (!uploadResult.success) {
       return res.status(500).json({
@@ -604,7 +605,7 @@ const uploadInterviewFile = async (req, res) => {
     let transcription = null;
     let processedContent = null;
 
-    console.log('Is audio file:', isAudioFile);
+    // console.log('Is audio file:', isAudioFile);
     // return
     // Step 1: Process file based on type (simplified workflow - no processText stage)
     if (isAudioFile) {
@@ -631,9 +632,12 @@ const uploadInterviewFile = async (req, res) => {
       fileType: file.mimetype,
       duration: calculatedDuration,
       wordCount: calculatedWordCount,
+      client_name: sessionData.clientName,
+      sessionId: sessionData.sessionId,
+      notes: sessionData.notes || {txt: 'first attempt - no notes provided'},
+      preferred_language: sessionData.preferred_language 
     };
 
-    // console.log('Interview metadata:', interviewMetadata);
     // console.log('Interview processed content:', processedContent);
 
     const generatedDraft = await aiService.generateDraft(processedContent, interviewMetadata);

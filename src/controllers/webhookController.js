@@ -62,9 +62,6 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 
 // Helper function to process draft data (moved from aiService)
 const processDraftData = async (draft, interviewId, metadata) => {
-    console.log('🎯 Processing AI draft data...');
-    console.log('Draft data:', JSON.stringify(draft, null, 4));
-    console.log('Metadata:', metadata);
 
     let extractedData = null;
     let rawContent = '';
@@ -218,7 +215,15 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 sourceInterview: interviewId,
                 processingMethod: 'AI_REAL_GENERATION_V2',
                 aiModel: draft.model || 'n8n-endpoint',
-                confidence: draft.confidence || null
+                confidence: draft.confidence || null,
+                // Preserve regeneration metadata if present
+                ...(metadata.regenerationType && {
+                    regenerationType: metadata.regenerationType,
+                    previousDraftId: metadata.previousDraftId,
+                    adminInstructions: metadata.adminInstructions,
+                    regeneratedAt: metadata.regeneratedAt,
+                    isRegeneration: true
+                })
             }
         },
         status: 'draft',

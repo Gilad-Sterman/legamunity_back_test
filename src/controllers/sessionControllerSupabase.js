@@ -1243,7 +1243,6 @@ const regenerateDraft = async (req, res) => {
           return String(note);
         }).join('\n\n');
         processedNotes = [{ text: combinedText }];
-        console.log(`📝 Using ${existingNotes.length} notes from existing draft`);
       }
     }
     

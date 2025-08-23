@@ -1218,7 +1218,6 @@ const regenerateDraft = async (req, res) => {
     
     // First try to get notes from the request body
     if (notes && Array.isArray(notes) && notes.length > 0) {
-      console.log(`📝 Raw notes from request:`, JSON.stringify(notes, null, 2));
       const combinedText = notes.map(note => {
         // Handle different note structures
         if (typeof note === 'string') {

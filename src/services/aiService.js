@@ -648,7 +648,7 @@ const generateFullLifeStory = async (fullStoryData) => {
 
     const result = response.data;
     // console.log('✅ Real AI full life story generation completed successfully');
-    // console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
+    console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
 
     // Extract and parse AI content from response
     let aiContent = result;

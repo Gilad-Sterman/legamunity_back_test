@@ -1491,6 +1491,20 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
     }
 
     console.log(`✅ Interview ${interviewId} status updated to: ${status}`);
+
+    // Broadcast status update via WebSocket
+    if (global.io) {
+      const broadcastData = {
+        interviewId,
+        status,
+        timestamp: new Date().toISOString(),
+        content: updatedContent
+      };
+
+      global.io.to(`interview-${interviewId}`).emit('interview-status-update', broadcastData);
+      console.log(`📡 WebSocket broadcast sent for interview ${interviewId}: ${status}`);
+    }
+
   } catch (error) {
     console.error('Failed to update interview status:', error);
     throw error;

@@ -435,12 +435,12 @@ const handleDraftWebhook = async (req, res) => {
         }
 
         // Always respond with success to acknowledge webhook receipt
-        res.json({
-            success: true,
-            message: 'Draft webhook processed',
-            interviewId,
-            processed_at: new Date().toISOString()
-        });
+        // res.json({
+        //     success: true,
+        //     message: 'Draft webhook processed',
+        //     interviewId,
+        //     processed_at: new Date().toISOString()
+        // });
 
     } catch (error) {
         console.error('Error processing draft webhook:', error);

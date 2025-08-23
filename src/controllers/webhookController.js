@@ -325,6 +325,24 @@ const handleTranscriptionWebhook = async (req, res) => {
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');
+            
+            // Try to broadcast a general error if we can't identify the specific interview
+            if (global.io && req.body?.metadata) {
+                // If there's any other identifier we can use, try to broadcast
+                const fallbackId = req.body.metadata.sessionId || req.body.metadata.requestId;
+                if (fallbackId) {
+                    const errorData = {
+                        interviewId: fallbackId,
+                        status: 'error',
+                        error_message: 'Transcription failed due to missing interview ID. Please try again.',
+                        error_type: 'missing_interview_id',
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    global.io.to(`interview-${fallbackId}`).emit('interview-status-update', errorData);
+                    console.log(`📡 WebSocket error broadcast sent for fallback ID ${fallbackId}: missing_interview_id`);
+                }
+            }
             return;
         }
 
@@ -367,6 +385,20 @@ const handleTranscriptionWebhook = async (req, res) => {
             console.error(`❌ Transcription failed for interview ${interviewId}`);
             const notes = ['Transcription failed at ' + new Date().toISOString()];
             await updateInterviewStatus(interviewId, 'error', { notes });
+            
+            // Also broadcast error via WebSocket for immediate frontend notification
+            if (global.io) {
+                const errorData = {
+                    interviewId,
+                    status: 'error',
+                    error_message: 'Audio transcription failed. Please try uploading the file again.',
+                    error_type: 'transcription_failed',
+                    timestamp: new Date().toISOString()
+                };
+                
+                global.io.to(`interview-${interviewId}`).emit('interview-status-update', errorData);
+                console.log(`📡 WebSocket error broadcast sent for interview ${interviewId}: transcription_failed`);
+            }
         }
 
     } catch (error) {
@@ -377,6 +409,21 @@ const handleTranscriptionWebhook = async (req, res) => {
             try {
                 const notes = [`Webhook processing failed: ${error.message} at ${new Date().toISOString()}`];
                 await updateInterviewStatus(req.body.metadata.id, 'error', { notes });
+                
+                // Also broadcast error via WebSocket for immediate frontend notification
+                const interviewId = req.body.metadata.id;
+                if (global.io) {
+                    const errorData = {
+                        interviewId,
+                        status: 'error',
+                        error_message: 'Processing failed due to a technical error. Please try again.',
+                        error_type: 'webhook_processing_error',
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    global.io.to(`interview-${interviewId}`).emit('interview-status-update', errorData);
+                    console.log(`📡 WebSocket error broadcast sent for interview ${interviewId}: webhook_processing_error`);
+                }
             } catch (statusError) {
                 console.error('Failed to update interview status after webhook error:', statusError);
             }
@@ -402,11 +449,32 @@ const handleDraftWebhook = async (req, res) => {
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');
+            
+            // Try to broadcast a general error if we can't identify the specific interview
+            if (global.io && req.body?.metadata) {
+                // If there's any other identifier we can use, try to broadcast
+                const fallbackId = req.body.metadata.sessionId || req.body.metadata.requestId;
+                if (fallbackId) {
+                    const errorData = {
+                        interviewId: fallbackId,
+                        status: 'error',
+                        error_message: 'Processing failed due to missing interview ID. Please try again.',
+                        error_type: 'missing_interview_id',
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    global.io.to(`interview-${fallbackId}`).emit('interview-status-update', errorData);
+                    console.log(`📡 WebSocket error broadcast sent for fallback ID ${fallbackId}: missing_interview_id`);
+                }
+            }
             return;
         }
 
         console.log(`📝 Webhook: Draft generation ${draft ? 'completed' : 'failed'} for interview ${interviewId}`);
 
+        console.log('Draft data:', draft);
+        console.log('Metadata:', metadata);
+        
         if (draft) {
             // Draft generation successful
             console.log(`✅ Draft generation completed for interview ${interviewId}`);
@@ -432,15 +500,21 @@ const handleDraftWebhook = async (req, res) => {
             console.error(`❌ Draft generation failed for interview ${interviewId}`);
             const notes = ['Draft generation failed at ' + new Date().toISOString()];
             await updateInterviewStatus(interviewId, 'error', { notes });
+            
+            // Also broadcast error via WebSocket for immediate frontend notification
+            if (global.io) {
+                const errorData = {
+                    interviewId,
+                    status: 'error',
+                    error_message: 'AI draft generation failed. Please try processing the interview again.',
+                    error_type: 'draft_generation_failed',
+                    timestamp: new Date().toISOString()
+                };
+                
+                global.io.to(`interview-${interviewId}`).emit('interview-status-update', errorData);
+                console.log(`📡 WebSocket error broadcast sent for interview ${interviewId}: draft_generation_failed`);
+            }
         }
-
-        // Always respond with success to acknowledge webhook receipt
-        // res.json({
-        //     success: true,
-        //     message: 'Draft webhook processed',
-        //     interviewId,
-        //     processed_at: new Date().toISOString()
-        // });
 
     } catch (error) {
         console.error('Error processing draft webhook:', error);
@@ -450,8 +524,23 @@ const handleDraftWebhook = async (req, res) => {
             try {
                 const notes = [`Draft webhook processing failed: ${error.message} at ${new Date().toISOString()}`];
                 await updateInterviewStatus(req.body.metadata.id, 'error', { notes });
+                
+                // Also broadcast error via WebSocket for immediate frontend notification
+                const interviewId = req.body.metadata.id;
+                if (global.io) {
+                    const errorData = {
+                        interviewId,
+                        status: 'error',
+                        error_message: 'Draft processing failed due to a technical error. Please try again.',
+                    error_type: 'draft_webhook_processing_error',
+                    timestamp: new Date().toISOString()
+                };
+                
+                    global.io.to(`interview-${interviewId}`).emit('interview-status-update', errorData);
+                    console.log(`📡 WebSocket error broadcast sent for interview ${interviewId}: draft_webhook_processing_error`);
+                }
             } catch (statusError) {
-                console.error('Failed to update interview status after webhook error:', statusError);
+                console.error('Failed to update interview status after draft webhook error:', statusError);
             }
         }
     }

@@ -1213,20 +1213,25 @@ const regenerateDraft = async (req, res) => {
       });
     }
 
-    // Process notes safely
-    let oneNote = [];
-    if (notes && Array.isArray(notes)) {
-      if (notes.length > 1) {
-        oneNote = notes[notes.length - 1];
-        if (oneNote && typeof oneNote === 'object') {
-          oneNote.content = notes.map(note => note.content || '').join('\n');
-        }
-      } else {
-        oneNote = notes;
-      }
+    // Process notes safely - combine multiple notes into single array with one object
+    let processedNotes = [];
+    
+    // First try to get notes from the request body
+    if (notes && Array.isArray(notes) && notes.length > 0) {
+      const combinedText = notes.map(note => note.text || note).join('\n\n');
+      processedNotes = [{ text: combinedText }];
+      console.log(`📝 Using notes from request body: ${notes.length} notes combined into single object`);
     } else {
-      oneNote = [];
+      // If no notes in request, get them from the existing draft
+      const existingNotes = existingDraft.content?.notes || [];
+      if (existingNotes.length > 0) {
+        const combinedText = existingNotes.map(note => note.text || note).join('\n\n');
+        processedNotes = [{ text: combinedText }];
+        console.log(`📝 Using notes from existing draft: ${existingNotes.length} notes combined into single object`);
+      }
     }
+    
+    console.log(`📝 Final processed notes array:`, processedNotes);
     
 
     // Step 4: Prepare enhanced metadata for regeneration
@@ -1240,7 +1245,7 @@ const regenerateDraft = async (req, res) => {
       regenerationType: 'regenerate',
       previousDraftId: draftId,
       adminInstructions: instructions || '',
-      notes: oneNote || [],
+      notes: processedNotes || [],
       preferred_language: session.preferences.preferred_language,
       client_name: session.client_name,
       regeneratedAt: new Date().toISOString()

@@ -321,7 +321,14 @@ const generateDraft = async (content, interviewMetadata) => {
       duration: interviewMetadata.duration,
       location: interviewMetadata.location,
       notes: interviewMetadata.notes,
-      webhookUrl: interviewMetadata.webhookUrl
+      webhookUrl: interviewMetadata.webhookUrl,
+      // Include regeneration metadata if present
+      ...(interviewMetadata.regenerationType && {
+        regenerationType: interviewMetadata.regenerationType,
+        previousDraftId: interviewMetadata.previousDraftId,
+        adminInstructions: interviewMetadata.adminInstructions,
+        regeneratedAt: interviewMetadata.regeneratedAt
+      })
     },
     preferences: {
       language: interviewMetadata.preferred_language,

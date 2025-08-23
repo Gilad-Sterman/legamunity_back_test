@@ -342,6 +342,31 @@ const generateDraft = async (content, interviewMetadata) => {
     
     console.log('✅ n8n AI draft generation responded');
     console.log(response.data);
+    
+    // Check if response contains full draft (output field) or just acknowledgment
+    if (response.data.output) {
+      console.log('🎯 Received full draft response, triggering webhook directly');
+      
+      // Trigger webhook directly with the draft data
+      const webhookPayload = {
+        draft: response.data,
+        metadata: { id: interviewMetadata.id }
+      };
+      
+      // Call our own webhook endpoint
+      const webhookUrl = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/draft-complete`;
+      
+      try {
+        await axios.post(webhookUrl, webhookPayload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000
+        });
+        console.log('✅ Successfully triggered draft webhook with full response');
+      } catch (webhookError) {
+        console.error('❌ Error triggering draft webhook:', webhookError.message);
+      }
+    }
+    
     return response.data; // Return immediate response from n8n
   } catch (error) {
       const elapsedTime = Date.now() - startTime;

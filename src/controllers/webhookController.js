@@ -8,24 +8,24 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
     const supabase = require('../config/database');
 
     try {
+        // First get current content
+        const { data: currentInterview } = await supabase
+            .from('interviews')
+            .select('content')
+            .eq('id', interviewId)
+            .single();
+
+        const currentContent = currentInterview?.content || {};
+        
+        // Merge additional data into content field
+        const updatedContent = { ...currentContent, ...additionalData };
+
+        // Update only status, updated_at, and content
         const updateData = {
             status,
             updated_at: new Date().toISOString(),
-            ...additionalData
+            content: updatedContent
         };
-
-        // Update content field with additional data if provided
-        if (Object.keys(additionalData).length > 0) {
-            // First get current content
-            const { data: currentInterview } = await supabase
-                .from('interviews')
-                .select('content')
-                .eq('id', interviewId)
-                .single();
-
-            const currentContent = currentInterview?.content || {};
-            updateData.content = { ...currentContent, ...additionalData };
-        }
 
         const { error } = await supabase
             .from('interviews')
@@ -45,7 +45,7 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
                 interviewId,
                 status,
                 timestamp: new Date().toISOString(),
-                ...additionalData
+                content: updatedContent
             };
 
             global.io.to(`interview-${interviewId}`).emit('interview-status-update', broadcastData);
@@ -54,6 +54,204 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 
     } catch (error) {
         console.error('Failed to update interview status:', error);
+        throw error;
+    }
+};
+
+// Helper function to process draft data (moved from aiService)
+const processDraftData = async (draft, interviewId, metadata) => {
+    console.log('🎯 Processing AI draft data...');
+    
+    // Extract the actual AI content
+    let extractedData = {};
+    let rawContent = '';
+    
+    if (draft.output) {
+        let outputContent = draft.output;
+        
+        if (typeof outputContent === 'string') {
+            outputContent = outputContent.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+        }
+        
+        // Check for JSON in markdown code blocks
+        if (typeof outputContent === 'string' && outputContent.includes('```json')) {
+            try {
+                const jsonMatch = outputContent.match(/```json\s*([\s\S]*?)\s*```/);
+                if (jsonMatch && jsonMatch[1]) {
+                    const jsonContent = jsonMatch[1].trim();
+                    extractedData = JSON.parse(jsonContent);
+                    console.log('✅ Successfully parsed JSON from markdown code block');
+                }
+            } catch (parseError) {
+                console.log('⚠️ Error parsing JSON from markdown, using raw content');
+                rawContent = outputContent;
+            }
+        }
+        // Check for direct JSON response
+        else if (typeof outputContent === 'string' && outputContent.trim().startsWith('{')) {
+            try {
+                extractedData = JSON.parse(outputContent);
+                console.log('✅ Successfully parsed direct JSON response');
+            } catch (parseError) {
+                rawContent = outputContent;
+            }
+        }
+        else {
+            rawContent = outputContent;
+        }
+    } else {
+        rawContent = draft.message?.content || draft.content || draft.text || '';
+    }
+    
+    // Process extracted data
+    let finalTitle = '';
+    let finalStoryText = '';
+    let finalKeywords = [];
+    let finalFollowUps = [];
+    let finalToVerify = { people: [], places: [], organizations: [], dates: [] };
+    
+    if (extractedData && Object.keys(extractedData).length > 0) {
+        // Extract title
+        finalTitle = extractedData.title || extractedData.story_title || '';
+        
+        // Extract main story text
+        if (extractedData.summary_markdown) {
+            finalStoryText = extractedData.summary_markdown;
+        } else {
+            finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
+        }
+        
+        // Extract keywords
+        finalKeywords = extractedData.keywords || extractedData.key_themes || extractedData.themes || [];
+        
+        // Extract follow-up questions
+        finalFollowUps = extractedData.follow_ups || extractedData.followup_questions || extractedData.questions || [];
+        
+        // Extract verification data
+        if (extractedData.to_verify) {
+            const toVerifyData = extractedData.to_verify;
+            finalToVerify.people = toVerifyData.People || toVerifyData.people || [];
+            finalToVerify.places = toVerifyData.Places || toVerifyData.places || [];
+            finalToVerify.organizations = toVerifyData.Organizations || toVerifyData.organizations || [];
+            finalToVerify.dates = toVerifyData.Dates || toVerifyData.dates || [];
+        }
+    } else if (rawContent) {
+        finalStoryText = rawContent;
+        const lines = rawContent.split('\n').filter(line => line.trim().length > 0);
+        if (lines.length > 0) {
+            finalTitle = lines[0].replace(/^#\s+/, '').trim();
+        }
+    }
+    
+    // Parse sections from story text if it contains markdown headers
+    let extractedSections = {};
+    if (finalStoryText && finalStoryText.includes('##')) {
+        const sectionRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
+        const sectionMatches = [...finalStoryText.matchAll(sectionRegex)];
+        
+        sectionMatches.forEach((match, index) => {
+            if (match[1] && match[2]) {
+                const sectionKey = `section_${index + 1}`;
+                extractedSections[sectionKey] = {
+                    title: match[1].trim(),
+                    content: match[2].trim()
+                };
+            }
+        });
+    } else {
+        extractedSections.section_1 = {
+            title: finalTitle || 'Main Content',
+            content: finalStoryText
+        };
+    }
+    
+    // Calculate word count
+    const totalContent = Object.values(extractedSections).map(s => s.content).join(' ') + ' ' + finalStoryText;
+    const calculatedWordCount = totalContent.split(/\s+/).filter(word => word.length > 0).length;
+    const estimatedReadingTime = Math.max(1, Math.ceil(calculatedWordCount / 250));
+    
+    // Create normalized draft structure
+    const normalizedDraft = {
+        title: finalTitle || `Life Story Draft - ${new Date().toLocaleDateString()}`,
+        content: {
+            summary: finalStoryText.substring(0, 200) + (finalStoryText.length > 200 ? '...' : ''),
+            fullMarkdown: finalStoryText,
+            sections: extractedSections,
+            keyThemes: finalKeywords,
+            followUps: finalFollowUps,
+            toVerify: finalToVerify,
+            categories: [],
+            metadata: {
+                wordCount: calculatedWordCount,
+                estimatedReadingTime: `${estimatedReadingTime} minutes`,
+                generatedAt: new Date().toISOString(),
+                sourceInterview: interviewId,
+                processingMethod: 'AI_REAL_GENERATION_V2',
+                aiModel: draft.model || 'n8n-endpoint',
+                confidence: draft.confidence || null
+            }
+        },
+        status: 'draft',
+        version: '1.0',
+        createdAt: new Date().toISOString()
+    };
+    
+    console.log('✅ Draft data processing completed');
+    return normalizedDraft;
+};
+
+// Helper function to create draft entry in drafts table
+const createDraftEntry = async (interviewId, processedDraft) => {
+    try {
+        const supabase = require('../config/database');
+        
+        // Get interview details for draft creation
+        const { data: interview } = await supabase
+            .from('interviews')
+            .select('session_id, content')
+            .eq('id', interviewId)
+            .single();
+            
+        if (!interview) {
+            console.error('Interview not found for draft creation');
+            return;
+        }
+        
+        const draftData = {
+            interview_id: interviewId,
+            session_id: interview.session_id,
+            title: processedDraft.title,
+            content: processedDraft.content.fullMarkdown,
+            sections: processedDraft.content.sections,
+            key_themes: processedDraft.content.keyThemes,
+            follow_up_questions: processedDraft.content.followUps,
+            to_verify: processedDraft.content.toVerify,
+            word_count: processedDraft.content.metadata.wordCount,
+            estimated_reading_time: processedDraft.content.metadata.estimatedReadingTime,
+            status: 'draft',
+            version: processedDraft.version,
+            ai_model: processedDraft.content.metadata.aiModel,
+            confidence_score: processedDraft.content.metadata.confidence,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        
+        const { data, error } = await supabase
+            .from('drafts')
+            .insert(draftData)
+            .select()
+            .single();
+            
+        if (error) {
+            console.error('Error creating draft entry:', error);
+            throw error;
+        }
+        
+        console.log(`✅ Draft entry created successfully: ${data.id}`);
+        return data;
+        
+    } catch (error) {
+        console.error('Error in createDraftEntry:', error);
         throw error;
     }
 };
@@ -97,22 +295,21 @@ const triggerDraftGeneration = async (interviewId, transcriptionText, sessionDat
 // @route   POST /api/webhooks/transcription-complete
 // @access  Public (with validation)
 const handleTranscriptionWebhook = async (req, res) => {
-    // Always respond with success to acknowledge webhook receipt
+    // Always respond immediately to acknowledge webhook receipt
     res.json({
         success: true,
-        message: 'Transcription webhook accepted',
+        message: 'Transcription webhook received',
         processed_at: new Date().toISOString()
     });
 
     try {
         const { transcription, metadata } = req.body;
-        const interviewId = metadata.id;
+        const interviewId = metadata?.id;
+        
         // Validate required fields
         if (!interviewId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required field: interviewId'
-            });
+            console.error('Missing required field: interviewId in metadata');
+            return;
         }
 
         console.log(`🎵 Webhook: Transcription ${transcription ? 'completed' : 'failed'} for interview ${interviewId}`);
@@ -151,35 +348,23 @@ const handleTranscriptionWebhook = async (req, res) => {
 
         } else {
             // Transcription failed
-            console.error(`❌ Transcription failed for interview ${interviewId}: ${error}`);
-            const notes = ['Transcription failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
-            await updateInterviewStatus(interviewId, 'error', {
-                status: 'error',
-                notes
-            });
+            console.error(`❌ Transcription failed for interview ${interviewId}`);
+            const notes = ['Transcription failed at ' + new Date().toISOString()];
+            await updateInterviewStatus(interviewId, 'error', { notes });
         }
 
     } catch (error) {
         console.error('Error processing transcription webhook:', error);
 
         // Try to update interview status to error if possible
-        if (req.body?.interviewId) {
+        if (req.body?.metadata?.id) {
             try {
-                const notes = ['Webhook processing failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
-                await updateInterviewStatus(req.body.interviewId, 'error', {
-                    status: 'error',
-                    notes
-                });
+                const notes = [`Webhook processing failed: ${error.message} at ${new Date().toISOString()}`];
+                await updateInterviewStatus(req.body.metadata.id, 'error', { notes });
             } catch (statusError) {
                 console.error('Failed to update interview status after webhook error:', statusError);
             }
         }
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to process transcription webhook',
-            error: error.message
-        });
     }
 };
 
@@ -187,41 +372,50 @@ const handleTranscriptionWebhook = async (req, res) => {
 // @route   POST /api/webhooks/draft-complete
 // @access  Public (with validation)
 const handleDraftWebhook = async (req, res) => {
+    // Always respond immediately to acknowledge webhook receipt
+    res.json({
+        success: true,
+        message: 'Draft webhook received',
+        processed_at: new Date().toISOString()
+    });
+    
     try {
-        const { interviewId, draft, success, error, metadata } = req.body;
+        const { draft, metadata } = req.body;
+        const interviewId = metadata?.id;
 
         // Validate required fields
         if (!interviewId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required field: interviewId'
-            });
+            console.error('Missing required field: interviewId in metadata');
+            return;
         }
 
-        console.log(`📝 Webhook: Draft generation ${success ? 'completed' : 'failed'} for interview ${interviewId}`);
+        console.log(`📝 Webhook: Draft generation ${draft ? 'completed' : 'failed'} for interview ${interviewId}`);
 
-        if (success && draft) {
+        if (draft) {
             // Draft generation successful
             console.log(`✅ Draft generation completed for interview ${interviewId}`);
 
-            // Update status to completed with draft
+            // Extract and process the AI draft data
+            const processedDraft = await processDraftData(draft, interviewId, metadata);
+
+            // Update interview status to completed with processed draft
             await updateInterviewStatus(interviewId, 'completed', {
-                ai_draft: draft,
+                ai_draft: processedDraft,
                 draft_completed_at: new Date().toISOString(),
                 completed_date: new Date().toISOString(),
                 draft_metadata: metadata || {}
             });
 
+            // Create draft entry in drafts table
+            await createDraftEntry(interviewId, processedDraft);
+
             console.log(`🎉 Interview ${interviewId} processing completed successfully via webhook`);
 
         } else {
             // Draft generation failed
-            console.error(`❌ Draft generation failed for interview ${interviewId}: ${error}`);
-            const notes = ['Draft generation failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
-            await updateInterviewStatus(interviewId, 'error', {
-                status: 'error',
-                notes
-            });
+            console.error(`❌ Draft generation failed for interview ${interviewId}`);
+            const notes = ['Draft generation failed at ' + new Date().toISOString()];
+            await updateInterviewStatus(interviewId, 'error', { notes });
         }
 
         // Always respond with success to acknowledge webhook receipt
@@ -236,23 +430,14 @@ const handleDraftWebhook = async (req, res) => {
         console.error('Error processing draft webhook:', error);
 
         // Try to update interview status to error if possible
-        if (req.body?.interviewId) {
+        if (req.body?.metadata?.id) {
             try {
-                const notes = ['Draft webhook processing failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
-                await updateInterviewStatus(req.body.interviewId, 'error', {
-                    status: 'error',
-                    notes
-                });
+                const notes = [`Draft webhook processing failed: ${error.message} at ${new Date().toISOString()}`];
+                await updateInterviewStatus(req.body.metadata.id, 'error', { notes });
             } catch (statusError) {
                 console.error('Failed to update interview status after webhook error:', statusError);
             }
         }
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to process draft webhook',
-            error: error.message
-        });
     }
 };
 

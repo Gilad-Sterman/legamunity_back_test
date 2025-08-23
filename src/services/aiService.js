@@ -100,7 +100,7 @@ const uploadFileToAI = async (fileUrl, operation, metadata = {}) => {
   console.log(`🚀 Calling real AI audio transcription endpoint... fileUrl: ${fileUrl}`);
 
   // Use the specific AI_UPLOAD_RECORDINGS_ENDPOINT_URL for transcription
-  const audioTranscriptionEndpointUrl = process.env.AI_UPLOAD_RECORDINGS_ENDPOINT_URL_TEST;
+  const audioTranscriptionEndpointUrl = process.env.AI_UPLOAD_RECORDINGS_ENDPOINT_URL;
 
   if (!audioTranscriptionEndpointUrl) {
     throw new Error('AI_UPLOAD_RECORDINGS_ENDPOINT_URL is not configured');
@@ -297,53 +297,53 @@ const mockGenerateDraft = async (content, interviewMetadata) => {
  */
 // new version
 const generateDraft = async (content, interviewMetadata) => {
-  if (config.ai.mockMode) {
-    return mockGenerateDraft(content, interviewMetadata);
+  // if (config.ai.mockMode) {
+  //   return mockGenerateDraft(content, interviewMetadata);
+  // }
+
+  const startTime = Date.now();
+  console.log('🚀 Calling real AI draft generator endpoint...');
+
+  // Use the specific AI_DRAFT_GENERETOR_ENDPOINT_URL for draft generation
+  const draftEndpointUrl = process.env.AI_DRAFT_GENERETOR_ENDPOINT_URL;
+
+  if (!draftEndpointUrl) {
+    throw new Error('AI_DRAFT_GENERETOR_ENDPOINT_URL is not configured');
   }
 
-  return withRetry(async () => {
-    const startTime = Date.now();
-    console.log('🚀 Calling real AI draft generator endpoint...');
-
-    // Use the specific AI_DRAFT_GENERETOR_ENDPOINT_URL for draft generation
-    const draftEndpointUrl = process.env.AI_DRAFT_GENERETOR_ENDPOINT_URL;
-
-    if (!draftEndpointUrl) {
-      throw new Error('AI_DRAFT_GENERETOR_ENDPOINT_URL is not configured');
+  const payload = {
+    text: content,
+    interviewMetadata: {
+      id: interviewMetadata.id,
+      type: interviewMetadata.type || 'life_story',
+      clientName: interviewMetadata.client_name,
+      sessionId: interviewMetadata.sessionId,
+      duration: interviewMetadata.duration,
+      location: interviewMetadata.location,
+      notes: interviewMetadata.notes,
+      webhookUrl: interviewMetadata.webhookUrl
+    },
+    preferences: {
+      language: interviewMetadata.preferred_language,
     }
+  };
 
-    const payload = {
-      text: content,
-      interviewMetadata: {
-        id: interviewMetadata.id,
-        type: interviewMetadata.type || 'life_story',
-        clientName: interviewMetadata.client_name,
-        sessionId: interviewMetadata.sessionId,
-        duration: interviewMetadata.duration,
-        location: interviewMetadata.location,
-        notes: interviewMetadata.notes
+  try {
+    const response = await axios.post(draftEndpointUrl, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.AI_API_KEY && { 'Authorization': `Bearer ${process.env.AI_API_KEY}` })
       },
-      preferences: {
-        language: interviewMetadata.preferred_language,
-      }
-    };
+      timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 30000 // 30 seconds for immediate response
+    });
 
-    // console.log('PAYLOAD:', payload);
-    let result;
-
-    try {
-      const response = await axios.post(draftEndpointUrl, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(process.env.AI_API_KEY && { 'Authorization': `Bearer ${process.env.AI_API_KEY}` })
-        },
-        timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 600000 // Increased to 10 minutes default
-      });
-
-      const elapsedTime = Date.now() - startTime;
-      console.log(`✅ Real AI draft generation completed successfully in ${elapsedTime}ms`);
-      result = response.data;
-    } catch (error) {
+    const elapsedTime = Date.now() - startTime;
+    console.log(`✅ n8n AI draft generation responded in ${elapsedTime}ms`);
+    
+    console.log('✅ n8n AI draft generation responded');
+    console.log(response.data);
+    return response.data; // Return immediate response from n8n
+  } catch (error) {
       const elapsedTime = Date.now() - startTime;
       console.error(`❌ AI request failed after ${elapsedTime}ms: ${error.message}`);
       if (error.code === 'ECONNABORTED') {
@@ -357,272 +357,8 @@ const generateDraft = async (content, interviewMetadata) => {
       cleanError.code = error.code;
       cleanError.status = error.response?.status;
       throw cleanError;
-    }
-
-    // Extract the actual AI content
-    let extractedData = {};
-    let rawContent = '';
-    // console.log('AI response:', result);
-
-    if (result.output) {
-      let outputContent = result.output;
-
-      if (typeof outputContent === 'string') {
-        outputContent = outputContent.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
-      }
-
-      console.log(' Processing AI response output format');
-
-      // Check for JSON in markdown code blocks
-      if (typeof outputContent === 'string' && outputContent.includes('```json')) {
-        try {
-          const jsonMatch = outputContent.match(/```json\s*([\s\S]*?)\s*```/);
-          if (jsonMatch && jsonMatch[1]) {
-            const jsonContent = jsonMatch[1].trim();
-            console.log(' Found JSON content in markdown code block');
-            extractedData = JSON.parse(jsonContent);
-            console.log(' Successfully parsed JSON from markdown code block');
-          }
-        } catch (parseError) {
-          console.log(' Error parsing JSON from markdown code block:', parseError.message);
-          console.log(' Falling back to raw content');
-          rawContent = outputContent;
-        }
-      }
-      // Check for direct JSON response
-      else if (typeof outputContent === 'string' && outputContent.trim().startsWith('{')) {
-        try {
-          extractedData = JSON.parse(outputContent);
-          console.log(' Successfully parsed direct JSON response');
-        } catch (parseError) {
-          console.log(' Error parsing direct JSON response:', parseError.message);
-          console.log(' Falling back to raw content');
-          rawContent = outputContent;
-        }
-      }
-      // Handle plain text response
-      else {
-        console.log(' No JSON structure found, using raw content');
-        rawContent = outputContent;
-      }
-    } else {
-      // Fallback to other response fields
-      rawContent = result.message?.content || result.content || result.text || '';
-    }
-
-    // console.log('📊 Extracted data:', extractedData ? 'JSON parsed successfully' : 'Using raw content');
-    // console.log('📝 Raw content length:', rawContent.length);
-
-    // Now process the extracted data based on the new structured format
-    let finalTitle = '';
-    let finalStoryText = '';
-    let finalKeywords = [];
-    let finalFollowUps = [];
-    let finalToVerify = { people: [], places: [], organizations: [], dates: [] };
-
-    if (extractedData) {
-      // Handle the new structured JSON format
-      console.log('🎯 Processing structured JSON data...');
-
-      // Now extract the specific fields from the extracted data or raw content
-      if (extractedData && Object.keys(extractedData).length > 0) {
-        console.log('🔍 Extracting structured data from parsed JSON');
-
-        // Extract title
-        finalTitle = extractedData.title || extractedData.story_title || '';
-        console.log(`📌 Title: "${finalTitle}"`);
-
-        // Extract main story text - prioritize summary_markdown for Hebrew content
-        if (extractedData.summary_markdown) {
-          console.log('📄 Found summary_markdown field - using as main content');
-          finalStoryText = extractedData.summary_markdown;
-        } else {
-          finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
-          console.log('📄 Using alternative content field');
-        }
-
-        // Extract keywords
-        finalKeywords = extractedData.keywords || extractedData.key_themes || extractedData.themes || [];
-        console.log(`🏷️ Keywords: ${finalKeywords.length > 0 ? finalKeywords.join(', ') : 'None'}`);
-
-        // Extract follow-up questions
-        finalFollowUps = extractedData.follow_ups || extractedData.followup_questions || extractedData.questions || [];
-        console.log(`❓ Follow-up questions: ${finalFollowUps.length}`);
-
-        // Extract verification data with case-insensitive handling
-        if (extractedData.to_verify) {
-          console.log('✅ Found to_verify data');
-          // Handle both capitalized and lowercase keys
-          const toVerifyData = extractedData.to_verify;
-
-          // Extract people with case-insensitive handling
-          if (toVerifyData.People || toVerifyData.people) {
-            finalToVerify.people = toVerifyData.People || toVerifyData.people || [];
-            console.log(`👤 People to verify: ${finalToVerify.people.length}`);
-          }
-
-          // Extract places with case-insensitive handling
-          if (toVerifyData.Places || toVerifyData.places) {
-            finalToVerify.places = toVerifyData.Places || toVerifyData.places || [];
-            console.log(`📍 Places to verify: ${finalToVerify.places.length}`);
-          }
-
-          // Extract organizations with case-insensitive handling
-          if (toVerifyData.Organizations || toVerifyData.organizations) {
-            finalToVerify.organizations = toVerifyData.Organizations || toVerifyData.organizations || [];
-            console.log(`🏢 Organizations to verify: ${finalToVerify.organizations.length}`);
-          }
-
-          // Extract dates with case-insensitive handling
-          if (toVerifyData.Dates || toVerifyData.dates) {
-            finalToVerify.dates = toVerifyData.Dates || toVerifyData.dates || [];
-            console.log(`📅 Dates to verify: ${finalToVerify.dates.length}`);
-          }
-        }
-
-        // Extract sections if available
-        if (extractedData.sections) {
-          extractedSections = extractedData.sections;
-          console.log(`📑 Found ${Object.keys(extractedSections).length} predefined sections`);
-        }
-      } else if (rawContent) {
-        // Fallback to raw content
-        console.log('⚠️ No structured data found, falling back to raw content');
-        finalStoryText = rawContent;
-
-        // Try to extract a title from the first line
-        const lines = rawContent.split('\n').filter(line => line.trim().length > 0);
-        if (lines.length > 0) {
-          finalTitle = lines[0].replace(/^#\s+/, '').trim();
-          console.log(`📌 Extracted title from first line: "${finalTitle}"`);
-        }
-      }
-      console.log(`🔍 To verify - People: ${finalToVerify.people.length}, Places: ${finalToVerify.places.length}, Organizations: ${finalToVerify.organizations.length}, Dates: ${finalToVerify.dates.length}`);
-    } else if (rawContent) {
-      // Fallback to parsing raw content (legacy format)
-      console.log('🔄 Falling back to raw content parsing...');
-      finalStoryText = rawContent;
-      finalTitle = `Life Story Draft - ${interviewMetadata.name || interviewMetadata.clientName || 'Interview'} ${new Date().toLocaleDateString()}`;
-    } else {
-      throw new Error('No usable content found in AI response');
-    }
-
-    // Parse sections from story text if it contains markdown headers
-    let extractedSections = {};
-    if (finalStoryText && finalStoryText.includes('##')) {
-      const sectionRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
-      const sectionMatches = [...finalStoryText.matchAll(sectionRegex)];
-
-      sectionMatches.forEach((match, index) => {
-        if (match[1] && match[2]) {
-          const sectionKey = match[1].trim().toLowerCase().replace(/\s+/g, '_');
-          extractedSections[sectionKey] = match[2].trim();
-        }
-      });
-
-      console.log(`📚 Extracted ${Object.keys(extractedSections).length} sections from story text`);
-    } else {
-      // If no sections found, use the entire story as main content
-      extractedSections.main_story = finalStoryText;
-    }
-
-    // Calculate word count from the actual content
-    const totalContent = Object.values(extractedSections).join(' ') + ' ' + finalStoryText;
-    const calculatedWordCount = totalContent.split(/\s+/).filter(word => word.length > 0).length;
-    const estimatedReadingTime = Math.max(1, Math.ceil(calculatedWordCount / 250)); // 250 words per minute
-
-    // Create the normalized response structure using the new extracted data
-    const normalizedDraft = {
-      title: finalTitle,
-      content: {
-        summary: finalStoryText.substring(0, 200) + (finalStoryText.length > 200 ? '...' : ''),
-        fullMarkdown: finalStoryText, // Store the complete markdown content
-        sections: {},
-        keyThemes: finalKeywords,
-        followUps: finalFollowUps,
-        toVerify: finalToVerify,
-        categories: [],
-        metadata: {
-          wordCount: calculatedWordCount,
-          estimatedReadingTime: `${estimatedReadingTime} minutes`,
-          generatedAt: new Date().toISOString(),
-          sourceInterview: interviewMetadata.id,
-          processingMethod: 'AI_REAL_GENERATION_V2',
-          aiModel: result.model || result.aiModel || 'n8n-endpoint',
-          confidence: result.confidence || null,
-          endpointUrl: draftEndpointUrl,
-          language: extractedData?.language || interviewMetadata.preferred_language || 'auto-detect',
-          sessionId: extractedData?.session_id || interviewMetadata.sessionId
-        }
-      },
-      status: result.status || 'draft',
-      version: result.version || '1.0',
-      createdAt: new Date().toISOString()
-    };
-
-    // Process sections from the markdown content
-    if (finalStoryText && finalStoryText.includes('##')) {
-      console.log('📋 Markdown headers detected, extracting sections...');
-      // Extract sections from markdown headers
-      const sectionRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
-      let sectionMatches;
-      try {
-        sectionMatches = [...finalStoryText.matchAll(sectionRegex)];
-        console.log(`📊 Found ${sectionMatches.length} potential markdown sections`);
-      } catch (error) {
-        console.log('⚠️ Error extracting markdown sections:', error.message);
-        sectionMatches = [];
-      }
-
-      if (sectionMatches && sectionMatches.length > 0) {
-        const extractedSections = {};
-
-        sectionMatches.forEach((match, index) => {
-          if (match[1] && match[2]) {
-            const sectionTitle = match[1].trim();
-            const sectionContent = match[2].trim();
-            const sectionKey = `section_${index + 1}`;
-
-            extractedSections[sectionKey] = {
-              title: sectionTitle,
-              content: sectionContent
-            };
-            // console.log(`📑 Section ${index + 1}: "${sectionTitle}" (${sectionContent.length} chars)`);
-          }
-        });
-
-        normalizedDraft.content.sections = extractedSections;
-        // console.log(`📚 Extracted ${Object.keys(extractedSections).length} sections from markdown content`);
-      } else {
-        // console.log('⚠️ No valid sections found in markdown content');
-        // If no sections found, use the entire content as one section
-        normalizedDraft.content.sections = {
-          section_1: {
-            title: finalTitle || 'Main Content',
-            content: finalStoryText
-          }
-        };
-      }
-    } else {
-      console.log('📄 No markdown headers found, using content as single section');
-      // If no sections found, use the entire content as one section
-      normalizedDraft.content.sections = {
-        section_1: {
-          title: finalTitle || 'Main Content',
-          content: finalStoryText
-        }
-      };
-    }
-
-    console.log('🎉 Draft generation completed with new structured format');
-    // console.log(`📊 Final draft - Title: "${normalizedDraft.title}", Sections: ${Object.keys(normalizedDraft.content.sections).length}, Keywords: ${normalizedDraft.content.keyThemes.length}, Follow-ups: ${normalizedDraft.content.followUps.length}`);
-
-    return normalizedDraft;
-  });
+  }
 };
-
-/**
-    // }
 
     // Calculate word count from the actual content
     // const totalContent = Object.values(extractedSections).join(' ') + ' ' + extractedSummary;

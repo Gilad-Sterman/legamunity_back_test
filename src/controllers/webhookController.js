@@ -314,6 +314,72 @@ const createDraftEntry = async (interviewId, processedDraft) => {
         }
 
         console.log(`✅ Draft entry created successfully: ${data.id}`);
+        
+        // Check if this is a regeneration and handle regeneration-specific logic
+        if (processedDraft.content?.metadata?.regenerationType === 'regenerate') {
+            const previousDraftId = processedDraft.content.metadata.previousDraftId;
+            
+            // Get the current regeneration count from the existing draft
+            const { data: existingDraft, error: fetchError } = await supabase
+                .from('drafts')
+                .select('content')
+                .eq('id', previousDraftId)
+                .single();
+                
+            if (fetchError) {
+                console.error('Error fetching existing draft content:', fetchError);
+            } else {
+                const currentRegenerationCount = existingDraft.content?.metadata?.regenerationCount || 0;
+                const newRegenerationCount = currentRegenerationCount + 1;
+                
+                // Update the regeneration count in the new content
+                if (!draftData.content.metadata) {
+                    draftData.content.metadata = {};
+                }
+                draftData.content.metadata.regenerationCount = newRegenerationCount;
+                draftData.content.metadata.regeneratedAt = new Date().toISOString();
+                
+                console.log(`🔄 Regeneration completed: Updating draft ${previousDraftId} regeneration count from ${currentRegenerationCount} to ${newRegenerationCount}`);
+                
+                // Update the existing draft with new content and regeneration metadata
+                const { error: updateError } = await supabase
+                    .from('drafts')
+                    .update({
+                        content: draftData.content,
+                        updated_at: new Date().toISOString(),
+                        completion_percentage: 100.0
+                    })
+                    .eq('id', previousDraftId);
+                    
+                if (updateError) {
+                    console.error('Error updating existing draft for regeneration:', updateError);
+                } else {
+                    console.log(`✅ Existing draft ${previousDraftId} updated with regenerated content (regeneration count: ${newRegenerationCount})`);
+                    
+                    // Delete the new draft entry since we updated the existing one
+                    await supabase.from('drafts').delete().eq('id', data.id);
+                    
+                    // Use the previous draft ID for WebSocket emission
+                    data.id = previousDraftId;
+                }
+            }
+        }
+        
+        // Emit WebSocket event for draft completion (including regeneration)
+        if (global.io) {
+            const broadcastData = {
+                interviewId: interviewId,
+                draftId: data.id,
+                sessionId: data.session_id,
+                stage: 'completed',
+                isRegeneration: processedDraft.content?.metadata?.regenerationType === 'regenerate',
+                timestamp: new Date().toISOString()
+            };
+
+            global.io.emit('draft-generation-complete', broadcastData);
+            console.log(`📡 WebSocket broadcast sent for draft completion: ${data.id}`);
+        }
+        
         return data;
 
     } catch (error) {

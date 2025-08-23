@@ -1152,7 +1152,9 @@ const regenerateDraft = async (req, res) => {
     }
 
     // Step 2: Get the source interview data
-    const sourceInterviewId = existingDraft.content?.interview_id || existingDraft.content?.metadata?.sourceInterview;
+    const sourceInterviewId = existingDraft.content?.interview_id || 
+                              existingDraft.content?.metadata?.sourceInterview ||
+                              existingDraft.content?.metadata?.id;
     if (!sourceInterviewId) {
       return res.status(400).json({
         success: false,
@@ -1211,13 +1213,19 @@ const regenerateDraft = async (req, res) => {
       });
     }
 
-    // if notes length is more than 1, set notes to the last note
+    // Process notes safely
     let oneNote = [];
-    if (interview.notes.length > 1) {
-      oneNote = notes[notes.length - 1];
-      oneNote.content = notes.map(note => note.content).join('\n');
+    if (notes && Array.isArray(notes)) {
+      if (notes.length > 1) {
+        oneNote = notes[notes.length - 1];
+        if (oneNote && typeof oneNote === 'object') {
+          oneNote.content = notes.map(note => note.content || '').join('\n');
+        }
+      } else {
+        oneNote = notes;
+      }
     } else {
-      oneNote = notes;
+      oneNote = [];
     }
     
 
@@ -1240,87 +1248,35 @@ const regenerateDraft = async (req, res) => {
 
     // Step 5: Generate new draft with enhanced context
     const aiService = require('../services/aiService');
+    
+    // Emit WebSocket event for regeneration started
+    if (global.io) {
+      const broadcastData = {
+        sessionId: sessionId,
+        draftId: draftId,
+        interviewId: sourceInterviewId,
+        stage: 'processing',
+        timestamp: new Date().toISOString()
+      };
+
+      global.io.emit('draft-regeneration-started', broadcastData);
+      console.log(`📡 WebSocket broadcast sent for regeneration started: ${draftId}`);
+    }
+    
     const regeneratedDraft = await aiService.generateDraft(originalContent, enhancedMetadata);
 
     // AI Generated Draft Structure validation (removed verbose logging)
 
-    // Step 6: Update existing draft instead of creating new version
-    // Preserve existing notes and add regeneration metadata
-    // const existingNotes = existingDraft.content?.notes || [];
-
-    // Ensure the regenerated draft has proper structure
-    const draftContent = {
-      summary: regeneratedDraft.content?.summary || regeneratedDraft.summary || "This interview session captured valuable insights about the subject's life journey.",
-      sections: regeneratedDraft.content?.sections || regeneratedDraft.sections || {
-        introduction: "Based on the interview content, this section introduces the subject and provides context for their life story.",
-        earlyLife: "Early life experiences and memories captured from the interview content.",
-        careerJourney: "Professional journey and career milestones discussed in the interview.",
-        personalRelationships: "Personal relationships and family connections explored during the conversation.",
-        lifeWisdom: "Wisdom and life lessons shared during the interview session.",
-        conclusion: "Summary and reflection on the life story captured through this interview."
-      },
-      keyThemes: regeneratedDraft.content?.keyThemes || regeneratedDraft.keyThemes || [
-        "Personal Growth",
-        "Life Experiences",
-        "Family and Heritage",
-        "Career Development",
-        "Wisdom and Reflection"
-      ],
-      followUps: regeneratedDraft.content?.followUps || [],
-      toVerify: regeneratedDraft.content?.toVerify || {
-        people: [],
-        places: [],
-        organizations: [],
-        dates: []
-      },
-      notes: [], // Dont Preserve existing notes
-      metadata: {
-        ...existingDraft.content?.metadata,
-        ...regeneratedDraft.metadata,
-        regeneratedFrom: draftId,
-        adminInstructions: instructions,
-        adminNotes: notes,
-        regenerationType: 'admin_regenerate',
-        regeneratedAt: new Date().toISOString(),
-        regenerationCount: (existingDraft.content?.metadata?.regenerationCount || 0) + 1
-      }
-    };
-
-    // Update existing draft instead of creating new one
-    const draftResult = await supabaseService.updateDraft(draftId, {
-      content: draftContent,
-      stage: 'regenerated'
-    });
-
-
-    if (!draftResult.success) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to update regenerated draft',
-        error: draftResult.error
-      });
-    }
-
-    // Step 7: Log the regeneration
-    try {
-      await req.logDraftGenerated(sessionId, sourceInterviewId, {
-        ...regeneratedDraft,
-        regenerationType: 'admin_regenerate',
-        previousDraftId: draftId
-      });
-    } catch (logError) {
-      console.error('Failed to log draft regeneration:', logError);
-    }
-
-    res.json({
+    // The regenerated draft will be processed by the webhook and createDraftEntry
+    // which will handle the regeneration logic and WebSocket events
+    
+    res.status(200).json({
       success: true,
+      message: 'Draft regeneration started',
       data: {
-        draft: draftResult.data,
-        previousDraftId: draftId,
-        regenerationType: 'admin_regenerate',
-        version: draftResult.data.version || 1
-      },
-      message: 'Draft regenerated successfully with admin notes and instructions'
+        stage: 'processing',
+        draftId: draftId
+      }
     });
 
   } catch (error) {

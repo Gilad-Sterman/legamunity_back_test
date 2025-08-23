@@ -154,9 +154,14 @@ class SupabaseService {
         // Associate drafts with interviews using metadata
         const interviewsWithDrafts = sortedInterviews.map(interview => {
           const interviewDrafts = sessionDrafts.filter(draft => {
-            // Check if draft has sourceInterview in metadata
-            return draft.content?.metadata?.sourceInterview === interview.id;
+            // Check multiple possible ways the draft might be linked to the interview
+            return draft.content?.metadata?.sourceInterview === interview.id ||
+                   draft.content?.interview_id === interview.id ||
+                   draft.content?.metadata?.id === interview.id;
           });
+          
+          // Sort drafts by version (highest first) to get the latest
+          interviewDrafts.sort((a, b) => (b.version || 0) - (a.version || 0));
           
           // Set ai_draft property for frontend compatibility
           const latestDraft = interviewDrafts.length > 0 ? interviewDrafts[0] : null;
@@ -255,9 +260,14 @@ class SupabaseService {
       // Associate drafts with interviews using metadata
       const interviewsWithDrafts = sortedInterviews.map(interview => {
         const interviewDrafts = drafts.filter(draft => {
-          // Check if draft has sourceInterview in metadata
-          return draft.content?.metadata?.sourceInterview === interview.id;
+          // Check multiple possible ways the draft might be linked to the interview
+          return draft.content?.metadata?.sourceInterview === interview.id ||
+                 draft.content?.interview_id === interview.id ||
+                 draft.content?.metadata?.id === interview.id;
         });
+        
+        // Sort drafts by version (highest first) to get the latest
+        interviewDrafts.sort((a, b) => (b.version || 0) - (a.version || 0));
         
         // Set ai_draft property for frontend compatibility
         const latestDraft = interviewDrafts.length > 0 ? interviewDrafts[0] : null;

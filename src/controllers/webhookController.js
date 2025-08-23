@@ -368,9 +368,14 @@ const createDraftEntry = async (interviewId, processedDraft) => {
         // Emit WebSocket event for draft completion (including regeneration)
         if (global.io) {
             const isRegeneration = processedDraft.content?.metadata?.regenerationType === 'regenerate';
+            const previousDraftId = processedDraft.content?.metadata?.previousDraftId;
+            
+            // For regeneration, use the original draft ID, not the new temporary one
+            const finalDraftId = isRegeneration && previousDraftId ? previousDraftId : data.id;
+            
             const broadcastData = {
                 interviewId: interviewId,
-                draftId: data.id,
+                draftId: finalDraftId,
                 sessionId: data.session_id,
                 stage: 'completed',
                 isRegeneration: isRegeneration,
@@ -378,7 +383,7 @@ const createDraftEntry = async (interviewId, processedDraft) => {
             };
 
             global.io.emit('draft-generation-complete', broadcastData);
-            console.log(`📡 WebSocket broadcast sent for draft completion: ${data.id} (isRegeneration: ${isRegeneration})`);
+            console.log(`📡 WebSocket broadcast sent for draft completion: ${finalDraftId} (isRegeneration: ${isRegeneration}, originalId: ${data.id})`);
         }
         
         return data;

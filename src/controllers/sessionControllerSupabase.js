@@ -1218,20 +1218,35 @@ const regenerateDraft = async (req, res) => {
     
     // First try to get notes from the request body
     if (notes && Array.isArray(notes) && notes.length > 0) {
-      const combinedText = notes.map(note => note.text || note).join('\n\n');
+      console.log(`📝 Raw notes from request:`, JSON.stringify(notes, null, 2));
+      const combinedText = notes.map(note => {
+        // Handle different note structures
+        if (typeof note === 'string') {
+          return note;
+        } else if (note && typeof note === 'object') {
+          return note.text || note.content || JSON.stringify(note);
+        }
+        return String(note);
+      }).join('\n\n');
       processedNotes = [{ text: combinedText }];
-      console.log(`📝 Using notes from request body: ${notes.length} notes combined into single object`);
+      console.log(`📝 Using ${notes.length} notes from request body`);
     } else {
       // If no notes in request, get them from the existing draft
       const existingNotes = existingDraft.content?.notes || [];
       if (existingNotes.length > 0) {
-        const combinedText = existingNotes.map(note => note.text || note).join('\n\n');
+        const combinedText = existingNotes.map(note => {
+          // Handle different note structures
+          if (typeof note === 'string') {
+            return note;
+          } else if (note && typeof note === 'object') {
+            return note.text || note.content || JSON.stringify(note);
+          }
+          return String(note);
+        }).join('\n\n');
         processedNotes = [{ text: combinedText }];
-        console.log(`📝 Using notes from existing draft: ${existingNotes.length} notes combined into single object`);
+        console.log(`📝 Using ${existingNotes.length} notes from existing draft`);
       }
     }
-    
-    console.log(`📝 Final processed notes array:`, processedNotes);
     
 
     // Step 4: Prepare enhanced metadata for regeneration

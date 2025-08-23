@@ -120,28 +120,37 @@ const processDraftData = async (draft, interviewId, metadata) => {
     let finalToVerify = { people: [], places: [], organizations: [], dates: [] };
 
     if (extractedData && Object.keys(extractedData).length > 0) {
+        console.log('🎯 Extracting data from:', Object.keys(extractedData));
+        
         // Extract title
         finalTitle = extractedData.title || extractedData.story_title || '';
+        console.log('📝 Extracted title:', finalTitle);
 
         // Extract main story text - prioritize summary_markdown from new AI format
         if (extractedData.summary_markdown) {
             finalStoryText = extractedData.summary_markdown;
+            console.log('📄 Using summary_markdown, length:', finalStoryText.length);
         } else {
             finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
+            console.log('📄 Using fallback text, length:', finalStoryText.length);
         }
 
         // Extract keywords - handle both array and string formats
         if (Array.isArray(extractedData.keywords)) {
             finalKeywords = extractedData.keywords;
+            console.log('🏷️ Extracted keywords:', finalKeywords.length, 'items');
         } else {
             finalKeywords = extractedData.key_themes || extractedData.themes || [];
+            console.log('🏷️ Using fallback keywords:', finalKeywords.length, 'items');
         }
 
         // Extract follow-up questions
         if (Array.isArray(extractedData.follow_ups)) {
             finalFollowUps = extractedData.follow_ups;
+            console.log('❓ Extracted follow-ups:', finalFollowUps.length, 'items');
         } else {
             finalFollowUps = extractedData.followup_questions || extractedData.questions || [];
+            console.log('❓ Using fallback follow-ups:', finalFollowUps.length, 'items');
         }
 
         // Extract verification data - handle the new format with capitalized keys
@@ -151,6 +160,12 @@ const processDraftData = async (draft, interviewId, metadata) => {
             finalToVerify.places = toVerifyData.Places || toVerifyData.places || [];
             finalToVerify.organizations = toVerifyData.Organizations || toVerifyData.organizations || [];
             finalToVerify.dates = toVerifyData.Dates || toVerifyData.dates || [];
+            console.log('✅ Extracted verification data:', {
+                people: finalToVerify.people.length,
+                places: finalToVerify.places.length,
+                organizations: finalToVerify.organizations.length,
+                dates: finalToVerify.dates.length
+            });
         }
     } else if (rawContent) {
         finalStoryText = rawContent;
@@ -162,9 +177,13 @@ const processDraftData = async (draft, interviewId, metadata) => {
 
     // Parse sections from story text if it contains markdown headers
     let extractedSections = {};
+    console.log('🔍 Processing sections from finalStoryText:', finalStoryText?.substring(0, 200));
+    
     if (finalStoryText && finalStoryText.includes('##')) {
+        console.log('📝 Found markdown headers, parsing sections...');
         const sectionRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
         const sectionMatches = [...finalStoryText.matchAll(sectionRegex)];
+        console.log('📋 Found', sectionMatches.length, 'sections');
 
         sectionMatches.forEach((match, index) => {
             if (match[1] && match[2]) {
@@ -173,13 +192,16 @@ const processDraftData = async (draft, interviewId, metadata) => {
                     title: match[1].trim(),
                     content: match[2].trim()
                 };
+                console.log(`✅ Section ${index + 1}:`, match[1].trim(), '- Content length:', match[2].trim().length);
             }
         });
     } else {
+        console.log('📄 No markdown headers found, creating single section');
         extractedSections.section_1 = {
             title: finalTitle || 'Main Content',
-            content: finalStoryText
+            content: finalStoryText || ''
         };
+        console.log('📄 Single section created with content length:', (finalStoryText || '').length);
     }
 
     // Calculate word count
@@ -213,7 +235,7 @@ const processDraftData = async (draft, interviewId, metadata) => {
         createdAt: new Date().toISOString()
     };
 
-    console.log('✅ Draft data processing completed');
+    console.log('✅ Draft data processing completed', normalizedDraft);
     return normalizedDraft;
 };
 

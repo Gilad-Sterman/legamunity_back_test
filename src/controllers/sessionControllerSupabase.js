@@ -1152,7 +1152,7 @@ const regenerateDraft = async (req, res) => {
     }
 
     // Step 2: Get the source interview data
-    const sourceInterviewId = existingDraft.content?.metadata?.sourceInterview;
+    const sourceInterviewId = existingDraft.content?.interview_id || existingDraft.content?.metadata?.sourceInterview;
     if (!sourceInterviewId) {
       return res.status(400).json({
         success: false,

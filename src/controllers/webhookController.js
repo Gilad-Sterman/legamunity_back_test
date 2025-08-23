@@ -63,9 +63,10 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 // Helper function to process draft data (moved from aiService)
 const processDraftData = async (draft, interviewId, metadata) => {
     console.log('🎯 Processing AI draft data...');
+    console.log('Draft data:', JSON.stringify(draft, null, 4));
+    console.log('Metadata:', metadata);
 
-    // The AI now returns a direct object structure, not wrapped in output
-    let extractedData = {};
+    let extractedData = null;
     let rawContent = '';
 
     // Check if draft is the direct AI response object
@@ -73,6 +74,7 @@ const processDraftData = async (draft, interviewId, metadata) => {
         // Direct AI response format
         extractedData = draft;
         console.log('✅ Using direct AI response object');
+        console.log('🔍 Direct response keys:', Object.keys(draft));
     }
     // Legacy handling for wrapped responses
     else if (draft.output) {
@@ -81,9 +83,17 @@ const processDraftData = async (draft, interviewId, metadata) => {
         if (typeof outputContent === 'string') {
             outputContent = outputContent.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
         }
-
+        // Handle JSON string response
+        else if (typeof outputContent === 'string' && outputContent.trim().startsWith('{')) {
+            try {
+                extractedData = JSON.parse(outputContent);
+                console.log('✅ Successfully parsed direct JSON response');
+            } catch (parseError) {
+                rawContent = outputContent;
+            }
+        }
         // Check for JSON in markdown code blocks
-        if (typeof outputContent === 'string' && outputContent.includes('```json')) {
+        else if (typeof outputContent === 'string' && outputContent.includes('```json')) {
             try {
                 const jsonMatch = outputContent.match(/```json\s*([\s\S]*?)\s*```/);
                 if (jsonMatch && jsonMatch[1]) {
@@ -96,21 +106,15 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 rawContent = outputContent;
             }
         }
-        // Check for direct JSON response
-        else if (typeof outputContent === 'string' && outputContent.trim().startsWith('{')) {
-            try {
-                extractedData = JSON.parse(outputContent);
-                console.log('✅ Successfully parsed direct JSON response');
-            } catch (parseError) {
-                rawContent = outputContent;
-            }
-        }
         else {
             rawContent = outputContent;
         }
     } else {
         rawContent = draft.message?.content || draft.content || draft.text || '';
     }
+
+    console.log('🔍 After parsing - extractedData:', extractedData ? 'FOUND' : 'NULL');
+    console.log('🔍 After parsing - rawContent:', rawContent ? 'FOUND' : 'NULL');
 
     // Process extracted data
     let finalTitle = '';

@@ -1525,9 +1525,10 @@ const triggerAITranscription = async (interviewId, fileUrl, sessionData) => {
     
   } catch (error) {
     console.error('Error triggering AI transcription:', error);
+    const notes = ['Transcription failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
     await updateInterviewStatus(interviewId, 'error', { 
-      error_message: `Transcription failed: ${error.message}`,
-      error_occurred_at: new Date().toISOString()
+      status: 'error',
+      notes
     });
     throw error;
   }
@@ -1560,9 +1561,10 @@ const triggerDraftGeneration = async (interviewId, transcriptionText, sessionDat
     
   } catch (error) {
     console.error('Error triggering draft generation:', error);
+    const notes = ['Draft generation failed: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
     await updateInterviewStatus(interviewId, 'error', { 
-      error_message: `Draft generation failed: ${error.message}`,
-      error_occurred_at: new Date().toISOString()
+      status: 'error',
+      notes
     });
     throw error;
   }
@@ -1584,9 +1586,10 @@ const handleTranscriptionComplete = async (interviewId, transcription, sessionDa
     
   } catch (error) {
     console.error('Error handling transcription completion:', error);
+    const notes = ['Failed to process transcription: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
     await updateInterviewStatus(interviewId, 'error', { 
-      error_message: `Failed to process transcription: ${error.message}`,
-      error_occurred_at: new Date().toISOString()
+      status: 'error',
+      notes
     });
   }
 };
@@ -1607,9 +1610,10 @@ const handleDraftComplete = async (interviewId, draft, sessionData) => {
     
   } catch (error) {
     console.error('Error handling draft completion:', error);
+    const notes = ['Failed to save draft: ' + error.message || 'Unknown error' + ' at ' + new Date().toISOString()];
     await updateInterviewStatus(interviewId, 'error', { 
-      error_message: `Failed to save draft: ${error.message}`,
-      error_occurred_at: new Date().toISOString()
+      status: 'error',
+      notes
     });
   }
 };

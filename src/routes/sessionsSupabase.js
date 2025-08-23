@@ -68,6 +68,13 @@ router.post('/:id/interviews', sessionController.addInterviewToSession);
  */
 router.put('/interviews/:id', sessionController.updateInterview);
 
+/**
+ * @route GET /api/admin/sessions/interviews/:id/status
+ * @desc Get interview processing status for real-time updates
+ * @access Admin only
+ */
+router.get('/interviews/:id/status', sessionController.getInterviewStatus);
+
 // Upload file for interview
 const multer = require('multer');
 const upload = multer({ 
@@ -94,6 +101,13 @@ const upload = multer({
 });
 
 router.post('/interviews/:id/upload', upload.single('file'), sessionController.uploadInterviewFile);
+
+/**
+ * @route POST /api/admin/sessions/interviews/:id/upload-async
+ * @desc Upload file for interview with ASYNC AI processing (no timeout)
+ * @access Admin only
+ */
+router.post('/interviews/:id/upload-async', upload.single('file'), sessionController.uploadInterviewFileAsync);
 
 /**
  * @route POST /api/sessions-supabase/:sessionId/drafts/:draftId/regenerate

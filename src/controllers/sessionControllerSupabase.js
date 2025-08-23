@@ -561,12 +561,18 @@ const uploadInterviewFile = async (req, res) => {
     const { id: interviewId } = req.params;
     const file = req.file; // Assuming multer middleware for file handling
     const sessionData = JSON.parse(req.body.sessionData);
+    const isAsyncProcessing = req.headers['x-async-processing'] === 'true';
 
     if (!file) {
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
       });
+    }
+
+    // If async processing is requested, delegate to async function
+    if (isAsyncProcessing) {
+      return uploadInterviewFileAsync(req, res);
     }
 
     // Import AI service and Cloudinary service
@@ -1327,6 +1333,381 @@ const regenerateDraft = async (req, res) => {
   }
 };
 
+// @desc    Upload file for interview with ASYNC AI processing (no timeout)
+// @route   POST /api/admin/sessions/interviews/:id/upload-async
+// @access  Admin
+const uploadInterviewFileAsync = async (req, res) => {
+  try {
+    const { id: interviewId } = req.params;
+    const file = req.file;
+    const sessionData = JSON.parse(req.body.sessionData);
+
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    // Import services
+    const cloudinaryService = require('../services/cloudinaryService');
+    const supabase = require('../config/database');
+
+    // Determine file type
+    const audioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4','audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/flac', 'audio/m4a'];
+    const isAudioFile = audioTypes.includes(file.mimetype);
+    const fileType = isAudioFile ? 'audio' : 'text';
+
+    // STAGE 1: Update status to 'uploading'
+    await updateInterviewStatus(interviewId, 'uploading');
+
+    // STAGE 1: Upload file to Cloudinary (fast operation)
+    const uploadResult = await cloudinaryService.uploadFile(file, interviewId, fileType);
+    
+    if (!uploadResult.success) {
+      await updateInterviewStatus(interviewId, 'error', { 
+        error_message: 'Failed to upload file to cloud storage',
+        error_occurred_at: new Date().toISOString()
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload file to cloud storage',
+        error: uploadResult.error
+      });
+    }
+    
+    // Prepare file metadata
+    const fileMetadata = {
+      originalName: uploadResult.data.original_filename,
+      fileName: uploadResult.data.cloudinary_public_id,
+      fileSize: uploadResult.data.file_size,
+      mimeType: uploadResult.data.mime_type,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: req.user?.uid || 'system',
+      storageUrl: uploadResult.data.cloudinary_url
+    };
+
+    // STAGE 2: Update status to 'transcribing' and save file metadata
+    await updateInterviewStatus(interviewId, 'transcribing', { 
+      file_upload: fileMetadata,
+      processing_started_at: new Date().toISOString()
+    });
+
+    // STAGE 2: Trigger AI transcription (async - no wait)
+    if (isAudioFile) {
+      triggerAITranscription(interviewId, fileMetadata.storageUrl, sessionData);
+    } else {
+      // For text files, skip transcription and go directly to draft generation
+      const textContent = file.buffer.toString('utf8');
+      await updateInterviewStatus(interviewId, 'generating_draft', { 
+        transcription: textContent,
+        transcription_completed_at: new Date().toISOString()
+      });
+      triggerDraftGeneration(interviewId, textContent, sessionData);
+    }
+
+    // Get updated interview data to return to frontend
+    const { data: updatedInterview } = await supabase
+      .from('sessions')
+      .select('preferences')
+      .eq('id', sessionData.sessionId || sessionData.id)
+      .single();
+
+    const interview = updatedInterview?.preferences?.interviews?.find(int => int.id === interviewId);
+
+    // Return immediate success with interview data for Redux update
+    return res.json({
+      success: true,
+      message: isAudioFile ? 'File uploaded successfully, transcription started' : 'File uploaded successfully, draft generation started',
+      data: { 
+        interview: interview || {
+          id: interviewId,
+          status: isAudioFile ? 'transcribing' : 'generating_draft',
+          file_upload: fileMetadata,
+          processing_started_at: new Date().toISOString()
+        },
+        fileMetadata 
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in async file upload:', error);
+    
+    // Update interview status to error
+    if (req.params?.id) {
+      try {
+        await updateInterviewStatus(req.params.id, 'error', { 
+          error_message: error.message,
+          error_occurred_at: new Date().toISOString()
+        });
+      } catch (statusError) {
+        console.error('Failed to update interview status to error:', statusError);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error during file upload',
+      error: error.message
+    });
+  }
+};
+
+// Helper function to update interview status
+const updateInterviewStatus = async (interviewId, status, additionalData = {}) => {
+  const supabase = require('../config/database');
+  
+  try {
+    // First get current interview to preserve existing content
+    const { data: currentInterview, error: fetchError } = await supabase
+      .from('interviews')
+      .select('content')
+      .eq('id', interviewId)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching current interview:', fetchError);
+      throw fetchError;
+    }
+
+    const currentContent = currentInterview?.content || {};
+    
+    // Merge additional data into content field
+    const updatedContent = { ...currentContent, ...additionalData };
+
+    // Update interview with new status and merged content
+    const { error } = await supabase
+      .from('interviews')
+      .update({
+        status,
+        content: updatedContent,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', interviewId);
+
+    if (error) {
+      console.error('Error updating interview status:', error);
+      throw error;
+    }
+
+    console.log(`✅ Interview ${interviewId} status updated to: ${status}`);
+  } catch (error) {
+    console.error('Failed to update interview status:', error);
+    throw error;
+  }
+};
+
+// Helper function to trigger AI transcription (async)
+const triggerAITranscription = async (interviewId, fileUrl, sessionData) => {
+  try {
+    const aiService = require('../services/aiService');
+    
+    // Calculate metadata for AI processing
+    const interviewMetadata = {
+      id: interviewId,
+      name: `Interview ${interviewId}`,
+      type: 'audio_interview',
+      client_name: sessionData.clientName,
+      sessionId: sessionData.sessionId,
+      notes: sessionData.notes || 'No notes provided',
+      preferred_language: sessionData.preferred_language || 'auto-detect',
+      webhookUrl: `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/webhooks/transcription-complete`
+    };
+
+    console.log(`🎵 Starting async transcription for interview ${interviewId}`);
+    
+    // Call n8n transcription endpoint - this returns immediately after accepting the job
+    const response = await aiService.transcribeAudio(fileUrl, interviewMetadata);
+    
+    // The response indicates the job was accepted, not that transcription is complete
+    console.log(`✅ Transcription job accepted for interview ${interviewId}`);
+    return response; // Return immediate response to indicate job started
+    
+  } catch (error) {
+    console.error('Error triggering AI transcription:', error);
+    await updateInterviewStatus(interviewId, 'error', { 
+      error_message: `Transcription failed: ${error.message}`,
+      error_occurred_at: new Date().toISOString()
+    });
+    throw error;
+  }
+};
+
+// Helper function to trigger draft generation (async)
+const triggerDraftGeneration = async (interviewId, transcriptionText, sessionData) => {
+  try {
+    const aiService = require('../services/aiService');
+    
+    const interviewMetadata = {
+      id: interviewId,
+      name: `Interview ${interviewId}`,
+      type: 'life_story',
+      client_name: sessionData.clientName,
+      sessionId: sessionData.sessionId,
+      notes: sessionData.notes || 'No notes provided',
+      preferred_language: sessionData.preferred_language || 'auto-detect',
+      webhookUrl: `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/webhooks/draft-complete`
+    };
+
+    console.log(`📝 Starting async draft generation for interview ${interviewId}`);
+    
+    // Call n8n draft generation endpoint - this returns immediately after accepting the job
+    const response = await aiService.generateDraft(transcriptionText, interviewMetadata);
+    
+    // The response indicates the job was accepted, not that draft is complete
+    console.log(`✅ Draft generation job accepted for interview ${interviewId}`);
+    return response; // Return immediate response to indicate job started
+    
+  } catch (error) {
+    console.error('Error triggering draft generation:', error);
+    await updateInterviewStatus(interviewId, 'error', { 
+      error_message: `Draft generation failed: ${error.message}`,
+      error_occurred_at: new Date().toISOString()
+    });
+    throw error;
+  }
+};
+
+// Helper function to handle transcription completion
+const handleTranscriptionComplete = async (interviewId, transcription, sessionData) => {
+  try {
+    console.log(`✅ Transcription completed for interview ${interviewId}`);
+    
+    // Update status to generating_draft
+    await updateInterviewStatus(interviewId, 'generating_draft', { 
+      transcription,
+      transcription_completed_at: new Date().toISOString()
+    });
+    
+    // Trigger draft generation
+    await triggerDraftGeneration(interviewId, transcription, sessionData);
+    
+  } catch (error) {
+    console.error('Error handling transcription completion:', error);
+    await updateInterviewStatus(interviewId, 'error', { 
+      error_message: `Failed to process transcription: ${error.message}`,
+      error_occurred_at: new Date().toISOString()
+    });
+  }
+};
+
+// Helper function to handle draft completion
+const handleDraftComplete = async (interviewId, draft, sessionData) => {
+  try {
+    console.log(`✅ Draft generation completed for interview ${interviewId}`);
+    
+    // Update status to completed with draft
+    await updateInterviewStatus(interviewId, 'completed', { 
+      ai_draft: draft,
+      draft_completed_at: new Date().toISOString(),
+      completed_date: new Date().toISOString()
+    });
+    
+    console.log(`🎉 Interview ${interviewId} processing completed successfully`);
+    
+  } catch (error) {
+    console.error('Error handling draft completion:', error);
+    await updateInterviewStatus(interviewId, 'error', { 
+      error_message: `Failed to save draft: ${error.message}`,
+      error_occurred_at: new Date().toISOString()
+    });
+  }
+};
+
+// @desc    Get interview processing status for real-time updates
+// @route   GET /api/admin/sessions/interviews/:id/status
+// @access  Admin
+const getInterviewStatus = async (req, res) => {
+  try {
+    const { id: interviewId } = req.params;
+    const supabase = require('../config/database');
+
+    // Get interview status and content
+    const { data: interview, error } = await supabase
+      .from('interviews')
+      .select('status, content, updated_at')
+      .eq('id', interviewId)
+      .single();
+
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'Interview not found',
+        error: error.message
+      });
+    }
+
+    // Extract processing information from content
+    const content = interview.content || {};
+    const statusData = {
+      status: interview.status,
+      updated_at: interview.updated_at,
+      processing_started_at: content.processing_started_at || null,
+      transcription_completed_at: content.transcription_completed_at || null,
+      draft_completed_at: content.draft_completed_at || null,
+      error_message: content.error_message || null,
+      error_occurred_at: content.error_occurred_at || null,
+      hasFileUpload: !!content.file_upload,
+      hasTranscription: !!content.transcription,
+      hasDraft: !!content.ai_draft
+    };
+
+    // Add stage-specific data based on current status
+    switch (interview.status) {
+      case 'uploading':
+        statusData.stage = 'uploading';
+        statusData.message = 'Uploading file to cloud storage...';
+        statusData.progress = 25;
+        break;
+      
+      case 'transcribing':
+        statusData.stage = 'transcribing';
+        statusData.message = 'File uploaded ✓ Transcribing audio...';
+        statusData.progress = 50;
+        statusData.fileMetadata = content.file_upload || null;
+        break;
+      
+      case 'generating_draft':
+        statusData.stage = 'generating_draft';
+        statusData.message = 'Transcribed ✓ Generating life story draft...';
+        statusData.progress = 75;
+        statusData.transcriptionLength = content.transcription?.length || 0;
+        break;
+      
+      case 'completed':
+        statusData.stage = 'completed';
+        statusData.message = 'Complete ✓';
+        statusData.progress = 100;
+        statusData.draftMetadata = content.ai_draft?.content?.metadata || null;
+        break;
+      
+      case 'error':
+        statusData.stage = 'error';
+        statusData.message = `Error: ${content.error_message || 'Unknown error occurred'}`;
+        statusData.progress = 0;
+        break;
+      
+      default:
+        statusData.stage = 'unknown';
+        statusData.message = `Status: ${interview.status}`;
+        statusData.progress = 0;
+    }
+
+    res.json({
+      success: true,
+      data: statusData
+    });
+
+  } catch (error) {
+    console.error('Error getting interview status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get interview status',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllSessions,
   getSessionById,
@@ -1338,6 +1719,8 @@ module.exports = {
   getSessionStats,
   updateInterview,
   uploadInterviewFile,
+  uploadInterviewFileAsync, // New async upload method
+  getInterviewStatus, // New status polling endpoint
   deleteInterview,
   generateFullLifeStory,
   getSessionFullStories,

@@ -4,6 +4,8 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
 const path = require('path');
+const http = require('http');
+const { Server } = require('socket.io');
 
 // Load environment variables
 dotenv.config();
@@ -14,6 +16,7 @@ const supabaseRoutes = require('./routes/supabaseRoutes');
 const supabaseAuthRoutes = require('./routes/supabaseAuth');
 const sessionsSupabaseRoutes = require('./routes/sessionsSupabase');
 const fullLifeStoriesRoutes = require('./routes/fullLifeStories');
+const webhookRoutes = require('./routes/webhooks'); // New webhook routes
 // const adminRoutes = require('./routes/admin'); // Temporarily disabled due to missing controllers
 const logsRoutes = require('./routes/logs');
 const migrationRoutes = require('./routes/migration');
@@ -63,6 +66,7 @@ app.use('/api/supabase', supabaseRoutes);
 app.use('/api/supabase-auth', supabaseAuthRoutes);
 app.use('/api/sessions-supabase', sessionsSupabaseRoutes);
 app.use('/api/admin/full-life-stories', fullLifeStoriesRoutes);
+app.use('/api/webhooks', webhookRoutes); // New webhook routes for AI callbacks
 // app.use('/api/admin', adminRoutes); // Temporarily disabled due to missing controllers
 app.use('/api/logs', logsRoutes);
 app.use('/api/migration', migrationRoutes);
@@ -123,9 +127,44 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Create HTTP server and Socket.IO instance
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log(`🔌 Client connected: ${socket.id}`);
+  
+  // Join interview-specific room for targeted updates
+  socket.on('join-interview', (interviewId) => {
+    socket.join(`interview-${interviewId}`);
+    console.log(`📡 Client ${socket.id} joined interview room: ${interviewId}`);
+  });
+  
+  // Leave interview room
+  socket.on('leave-interview', (interviewId) => {
+    socket.leave(`interview-${interviewId}`);
+    console.log(`📡 Client ${socket.id} left interview room: ${interviewId}`);
+  });
+  
+  socket.on('disconnect', () => {
+    console.log(`🔌 Client disconnected: ${socket.id}`);
+  });
+});
+
+// Make io available globally for webhook broadcasts
+global.io = io;
+
 // Start server
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔌 WebSocket server ready for real-time updates`);
 });
 
 // Set server timeout to 5 minutes for AI processing

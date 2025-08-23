@@ -354,7 +354,7 @@ const generateDraft = async (content, interviewMetadata) => {
       };
       
       // Call our own webhook endpoint
-      const webhookUrl = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/webhooks/draft-complete`;
+      const webhookUrl = `https://legamunity-test.onrender.com/api/webhooks/draft-complete`;
       
       try {
         await axios.post(webhookUrl, webhookPayload, {

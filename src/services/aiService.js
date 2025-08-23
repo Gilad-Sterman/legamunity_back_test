@@ -660,8 +660,23 @@ const generateFullLifeStory = async (fullStoryData) => {
     // Extract and parse AI content from response
     let aiContent = result;
 
-    // Handle direct output field (n8n workflow response)
-    if (result.output) {
+    // Handle the new response structure: [{ data: "[{\"output\":\"...content...\"}"]" }]
+    if (Array.isArray(result) && result.length > 0 && result[0].data) {
+      try {
+        // Parse the JSON string in data field
+        const parsedData = JSON.parse(result[0].data);
+        
+        // Extract the output field from the parsed data
+        if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].output) {
+          aiContent = parsedData[0].output;
+        }
+      } catch (parseError) {
+        console.error('❌ Error parsing AI response data:', parseError.message);
+        console.log('⚠️ Using raw result as fallback');
+      }
+    }
+    // Handle legacy response formats
+    else if (result.output) {
       aiContent = result.output;
     }
     // Handle nested response structure (similar to draft generator)
@@ -700,8 +715,15 @@ const generateFullLifeStory = async (fullStoryData) => {
     let extractedThemes = [];
 
     if (typeof aiContent === 'string') {
-      // Extract title from first markdown header (# Title)
-      const titleMatch = aiContent.match(/^\s*#\s+(.+?)\s*$/m);
+      // Extract title from first markdown header (# Title or ## Title)
+      // First try to find a level 1 header
+      let titleMatch = aiContent.match(/^\s*#\s+([^#].+?)\s*$/m);
+      
+      // If no level 1 header found, try to find the first level 2 header
+      if (!titleMatch) {
+        titleMatch = aiContent.match(/^\s*##\s+(.+?)\s*$/m);
+      }
+      
       if (titleMatch && titleMatch[1]) {
         extractedTitle = titleMatch[1].trim();
       }

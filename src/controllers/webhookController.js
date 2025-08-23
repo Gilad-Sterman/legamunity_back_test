@@ -69,12 +69,21 @@ const processDraftData = async (draft, interviewId, metadata) => {
     let extractedData = null;
     let rawContent = '';
 
+    // Check if draft is a JSON string (most common case)
+    if (typeof draft === 'string' && draft.trim().startsWith('{')) {
+        try {
+            extractedData = JSON.parse(draft);
+            console.log('✅ Parsed draft from JSON string');
+        } catch (parseError) {
+            console.log('⚠️ Failed to parse draft JSON string:', parseError.message);
+            rawContent = draft;
+        }
+    }
     // Check if draft is the direct AI response object
-    if (draft && typeof draft === 'object' && (draft.summary_markdown || draft.title || draft.keywords)) {
+    else if (draft && typeof draft === 'object' && (draft.summary_markdown || draft.title || draft.keywords)) {
         // Direct AI response format
         extractedData = draft;
         console.log('✅ Using direct AI response object');
-        console.log('🔍 Direct response keys:', Object.keys(draft));
     }
     // Legacy handling for wrapped responses
     else if (draft.output) {

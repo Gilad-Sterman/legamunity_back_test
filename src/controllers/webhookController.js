@@ -3,6 +3,8 @@
  * Handles callbacks from n8n AI workflow for transcription and draft generation
  */
 
+const supabaseService = require('../services/supabaseService');
+
 // Helper function to update interview status and broadcast via WebSocket
 const updateInterviewStatus = async (interviewId, status, additionalData = {}) => {
     const supabase = require('../config/database');
@@ -16,7 +18,7 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
             .single();
 
         const currentContent = currentInterview?.content || {};
-        
+
         // Merge additional data into content field
         const updatedContent = { ...currentContent, ...additionalData };
 
@@ -61,18 +63,18 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 // Helper function to process draft data (moved from aiService)
 const processDraftData = async (draft, interviewId, metadata) => {
     console.log('🎯 Processing AI draft data...');
-    
+
     // Extract the actual AI content
     let extractedData = {};
     let rawContent = '';
-    
+
     if (draft.output) {
         let outputContent = draft.output;
-        
+
         if (typeof outputContent === 'string') {
             outputContent = outputContent.replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
         }
-        
+
         // Check for JSON in markdown code blocks
         if (typeof outputContent === 'string' && outputContent.includes('```json')) {
             try {
@@ -102,31 +104,31 @@ const processDraftData = async (draft, interviewId, metadata) => {
     } else {
         rawContent = draft.message?.content || draft.content || draft.text || '';
     }
-    
+
     // Process extracted data
     let finalTitle = '';
     let finalStoryText = '';
     let finalKeywords = [];
     let finalFollowUps = [];
     let finalToVerify = { people: [], places: [], organizations: [], dates: [] };
-    
+
     if (extractedData && Object.keys(extractedData).length > 0) {
         // Extract title
         finalTitle = extractedData.title || extractedData.story_title || '';
-        
+
         // Extract main story text
         if (extractedData.summary_markdown) {
             finalStoryText = extractedData.summary_markdown;
         } else {
             finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
         }
-        
+
         // Extract keywords
         finalKeywords = extractedData.keywords || extractedData.key_themes || extractedData.themes || [];
-        
+
         // Extract follow-up questions
         finalFollowUps = extractedData.follow_ups || extractedData.followup_questions || extractedData.questions || [];
-        
+
         // Extract verification data
         if (extractedData.to_verify) {
             const toVerifyData = extractedData.to_verify;
@@ -142,13 +144,13 @@ const processDraftData = async (draft, interviewId, metadata) => {
             finalTitle = lines[0].replace(/^#\s+/, '').trim();
         }
     }
-    
+
     // Parse sections from story text if it contains markdown headers
     let extractedSections = {};
     if (finalStoryText && finalStoryText.includes('##')) {
         const sectionRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
         const sectionMatches = [...finalStoryText.matchAll(sectionRegex)];
-        
+
         sectionMatches.forEach((match, index) => {
             if (match[1] && match[2]) {
                 const sectionKey = `section_${index + 1}`;
@@ -164,12 +166,12 @@ const processDraftData = async (draft, interviewId, metadata) => {
             content: finalStoryText
         };
     }
-    
+
     // Calculate word count
     const totalContent = Object.values(extractedSections).map(s => s.content).join(' ') + ' ' + finalStoryText;
     const calculatedWordCount = totalContent.split(/\s+/).filter(word => word.length > 0).length;
     const estimatedReadingTime = Math.max(1, Math.ceil(calculatedWordCount / 250));
-    
+
     // Create normalized draft structure
     const normalizedDraft = {
         title: finalTitle || `Life Story Draft - ${new Date().toLocaleDateString()}`,
@@ -195,7 +197,7 @@ const processDraftData = async (draft, interviewId, metadata) => {
         version: '1.0',
         createdAt: new Date().toISOString()
     };
-    
+
     console.log('✅ Draft data processing completed');
     return normalizedDraft;
 };
@@ -204,23 +206,31 @@ const processDraftData = async (draft, interviewId, metadata) => {
 const createDraftEntry = async (interviewId, processedDraft) => {
     try {
         const supabase = require('../config/database');
-        
+
         // Get interview details for draft creation
         const { data: interview } = await supabase
             .from('interviews')
             .select('session_id, content')
             .eq('id', interviewId)
             .single();
-            
+
         if (!interview) {
             console.error('Interview not found for draft creation');
             return;
         }
-        
+
+        const existingDraftsResult = await supabaseService.getDraftsBySessionId(interview.session_id);
+        let nextVersion = 1;
+
+        if (existingDraftsResult.success && existingDraftsResult.data.length > 0) {
+            const latestDraft = existingDraftsResult.data[0]; // Already sorted by version desc
+            nextVersion = latestDraft.version + 1;
+        }
+
         // Store all AI-generated data in the content JSONB field
         const draftData = {
             session_id: interview.session_id,
-            version: parseInt(processedDraft.version) || 1,
+            version: nextVersion,
             stage: 'first_draft',
             content: {
                 interview_id: interviewId,
@@ -241,21 +251,21 @@ const createDraftEntry = async (interviewId, processedDraft) => {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
-        
+
         const { data, error } = await supabase
             .from('drafts')
             .insert(draftData)
             .select()
             .single();
-            
+
         if (error) {
             console.error('Error creating draft entry:', error);
             throw error;
         }
-        
+
         console.log(`✅ Draft entry created successfully: ${data.id}`);
         return data;
-        
+
     } catch (error) {
         console.error('Error in createDraftEntry:', error);
         throw error;
@@ -311,7 +321,7 @@ const handleTranscriptionWebhook = async (req, res) => {
     try {
         const { transcription, metadata } = req.body;
         const interviewId = metadata?.id;
-        
+
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');
@@ -384,7 +394,7 @@ const handleDraftWebhook = async (req, res) => {
         message: 'Draft webhook received',
         processed_at: new Date().toISOString()
     });
-    
+
     try {
         const { draft, metadata } = req.body;
         const interviewId = metadata?.id;

@@ -217,21 +217,27 @@ const createDraftEntry = async (interviewId, processedDraft) => {
             return;
         }
         
+        // Store all AI-generated data in the content JSONB field
         const draftData = {
-            interview_id: interviewId,
             session_id: interview.session_id,
-            title: processedDraft.title,
-            content: processedDraft.content.fullMarkdown,
-            sections: processedDraft.content.sections,
-            key_themes: processedDraft.content.keyThemes,
-            follow_up_questions: processedDraft.content.followUps,
-            to_verify: processedDraft.content.toVerify,
-            word_count: processedDraft.content.metadata.wordCount,
-            estimated_reading_time: processedDraft.content.metadata.estimatedReadingTime,
-            status: 'draft',
-            version: processedDraft.version,
-            ai_model: processedDraft.content.metadata.aiModel,
-            confidence_score: processedDraft.content.metadata.confidence,
+            version: parseInt(processedDraft.version) || 1,
+            stage: 'first_draft',
+            content: {
+                interview_id: interviewId,
+                title: processedDraft.title,
+                fullMarkdown: processedDraft.content.fullMarkdown,
+                sections: processedDraft.content.sections,
+                keyThemes: processedDraft.content.keyThemes,
+                followUps: processedDraft.content.followUps,
+                toVerify: processedDraft.content.toVerify,
+                metadata: {
+                    wordCount: processedDraft.content.metadata.wordCount,
+                    estimatedReadingTime: processedDraft.content.metadata.estimatedReadingTime,
+                    aiModel: processedDraft.content.metadata.aiModel,
+                    confidence: processedDraft.content.metadata.confidence
+                }
+            },
+            completion_percentage: 100.0, // Draft is complete when created
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };

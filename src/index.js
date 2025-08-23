@@ -31,7 +31,17 @@ app.use(helmet({
   crossOriginOpenerPolicy: false, // Disable COOP for HTTP
   crossOriginEmbedderPolicy: false, // Disable COEP for HTTP
   originAgentCluster: false, // Disable Origin-Agent-Cluster header
-})); // Security headers with HTTP compatibility
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      connectSrc: ["'self'", "ws:", "wss:", "https:", "http:"], // Allow WebSocket connections
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+      fontSrc: ["'self'", "https:", "data:"],
+    },
+  },
+})); // Security headers with WebSocket support
 
 // CORS configuration
 const corsOrigins = process.env.CORS_ORIGINS 
@@ -41,7 +51,9 @@ const corsOrigins = process.env.CORS_ORIGINS
       'http://localhost:5000', 
       'http://3.78.231.36', // Your EC2 public IP
       'http://3.78.231.36:3000',
-      'http://3.78.231.36:5000'
+      'http://3.78.231.36:5000',
+      'https://legamunity-test.onrender.com', // Production domain
+      'https://legamunity-test.onrender.com:443'
     ];
 
 app.use(cors({
@@ -131,10 +143,12 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: corsOrigins, // Use the same CORS origins as Express
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  allowEIO3: true, // Allow Engine.IO v3 clients
+  transports: ['polling', 'websocket'] // Support both transports
 });
 
 // WebSocket connection handling

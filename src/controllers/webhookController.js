@@ -64,11 +64,18 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 const processDraftData = async (draft, interviewId, metadata) => {
     console.log('🎯 Processing AI draft data...');
 
-    // Extract the actual AI content
+    // The AI now returns a direct object structure, not wrapped in output
     let extractedData = {};
     let rawContent = '';
 
-    if (draft.output) {
+    // Check if draft is the direct AI response object
+    if (draft && typeof draft === 'object' && (draft.summary_markdown || draft.title || draft.keywords)) {
+        // Direct AI response format
+        extractedData = draft;
+        console.log('✅ Using direct AI response object');
+    }
+    // Legacy handling for wrapped responses
+    else if (draft.output) {
         let outputContent = draft.output;
 
         if (typeof outputContent === 'string') {
@@ -116,20 +123,28 @@ const processDraftData = async (draft, interviewId, metadata) => {
         // Extract title
         finalTitle = extractedData.title || extractedData.story_title || '';
 
-        // Extract main story text
+        // Extract main story text - prioritize summary_markdown from new AI format
         if (extractedData.summary_markdown) {
             finalStoryText = extractedData.summary_markdown;
         } else {
             finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
         }
 
-        // Extract keywords
-        finalKeywords = extractedData.keywords || extractedData.key_themes || extractedData.themes || [];
+        // Extract keywords - handle both array and string formats
+        if (Array.isArray(extractedData.keywords)) {
+            finalKeywords = extractedData.keywords;
+        } else {
+            finalKeywords = extractedData.key_themes || extractedData.themes || [];
+        }
 
         // Extract follow-up questions
-        finalFollowUps = extractedData.follow_ups || extractedData.followup_questions || extractedData.questions || [];
+        if (Array.isArray(extractedData.follow_ups)) {
+            finalFollowUps = extractedData.follow_ups;
+        } else {
+            finalFollowUps = extractedData.followup_questions || extractedData.questions || [];
+        }
 
-        // Extract verification data
+        // Extract verification data - handle the new format with capitalized keys
         if (extractedData.to_verify) {
             const toVerifyData = extractedData.to_verify;
             finalToVerify.people = toVerifyData.People || toVerifyData.people || [];

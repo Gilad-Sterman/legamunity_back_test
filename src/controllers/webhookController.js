@@ -66,15 +66,56 @@ const processDraftData = async (draft, interviewId, metadata) => {
 
     let extractedData = null;
     let rawContent = '';
-
-    // Check if draft is a JSON string (most common case)
-    if (typeof draft === 'string' && draft.trim().startsWith('{')) {
-        try {
-            extractedData = JSON.parse(draft);
-            console.log('✅ Parsed draft from JSON string');
-        } catch (parseError) {
-            console.log('⚠️ Failed to parse draft JSON string:', parseError.message);
-            rawContent = draft;
+    
+    // Handle string draft data with potential formatting issues
+    if (typeof draft === 'string') {
+        const draftStr = draft.trim();
+        let jsonContent = null;
+        
+        // Case 1: Draft starts with ```json markdown code block
+        if (draftStr.startsWith('```json')) {
+            try {
+                const jsonMatch = draftStr.match(/```json\s*([\s\S]*?)\s*```/);
+                if (jsonMatch && jsonMatch[1]) {
+                    jsonContent = jsonMatch[1].trim();
+                    console.log('✅ Extracted JSON from markdown code block');
+                }
+            } catch (error) {
+                console.log('⚠️ Failed to extract JSON from markdown code block:', error.message);
+            }
+        }
+        // Case 2: Draft starts with ''json or other text prefix
+        else if (draftStr.includes('json') && draftStr.includes('{')) {
+            try {
+                // Find the first { character and extract from there
+                const jsonStartIndex = draftStr.indexOf('{');
+                if (jsonStartIndex !== -1) {
+                    jsonContent = draftStr.substring(jsonStartIndex);
+                    console.log(`✅ Extracted JSON after prefix: "${draftStr.substring(0, jsonStartIndex)}"`); 
+                }
+            } catch (error) {
+                console.log('⚠️ Failed to extract JSON after text prefix:', error.message);
+            }
+        }
+        // Case 3: Draft is a plain JSON string
+        else if (draftStr.startsWith('{')) {
+            jsonContent = draftStr;
+            console.log('✅ Using plain JSON string');
+        }
+        
+        // Try to parse the extracted JSON content
+        if (jsonContent) {
+            try {
+                extractedData = JSON.parse(jsonContent);
+                console.log('✅ Successfully parsed JSON content');
+            } catch (parseError) {
+                console.log('⚠️ Failed to parse extracted JSON content:', parseError.message);
+                rawContent = draftStr; // Fall back to using raw content
+            }
+        } else {
+            // No JSON found, use as raw content
+            rawContent = draftStr;
+            console.log('⚠️ No valid JSON structure found, using as raw text');
         }
     }
     // Check if draft is the direct AI response object

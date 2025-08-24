@@ -635,6 +635,8 @@ const generateFullLifeStory = async (fullStoryData) => {
       generatedAt: new Date().toISOString()
     };
 
+    console.log('PAYLOAD:', payload);
+
     const headers = {
       'Content-Type': 'application/json',
     };

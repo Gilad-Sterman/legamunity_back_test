@@ -263,6 +263,8 @@ const regenerateFullLifeStory = async (req, res) => {
     } else {
       myNote = notes[0];
     }
+
+    console.log('myNote:', myNote);
     // Get the existing story to get session info and notes
     const storyResult = await fullLifeStoriesService.getFullLifeStoryById(id);
 

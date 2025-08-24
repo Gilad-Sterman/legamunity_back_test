@@ -62,6 +62,7 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 
 // Helper function to process draft data (moved from aiService)
 const processDraftData = async (draft, interviewId, metadata) => {
+    console.log('Processing draft data:', draft, metadata);
 
     let extractedData = null;
     let rawContent = '';
@@ -561,6 +562,7 @@ const handleDraftWebhook = async (req, res) => {
         const { draft, metadata } = req.body;
         const interviewId = metadata?.id;
 
+        console.log('webhook controller: line 565: Processing draft webhook:', draft, metadata);
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');

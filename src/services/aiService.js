@@ -662,15 +662,28 @@ const generateFullLifeStory = async (fullStoryData) => {
     // Extract and parse AI content from response
     let aiContent = result;
 
-    // Handle the new response structure: [{ data: "[{\"output\":\"...content...\"}"]" }]
+    // Handle the new response structure: [{ data: "[{\"output\":\"...content...\"}]"}]
     if (Array.isArray(result) && result.length > 0 && result[0].data) {
       try {
         // Parse the JSON string in data field
         const parsedData = JSON.parse(result[0].data);
         
-        // Extract the output field from the parsed data
-        if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].output) {
-          aiContent = parsedData[0].output;
+        // Extract all outputs from the parsed data array
+        if (Array.isArray(parsedData) && parsedData.length > 0) {
+          // Check if we have multiple outputs to combine
+          if (parsedData.length > 1) {
+            // Combine all outputs from the array
+            const allOutputs = parsedData
+              .filter(item => item && item.output)
+              .map(item => item.output)
+              .join('\n\n');
+            
+            console.log(`✅ Combined ${parsedData.length} chapters from AI response`);
+            aiContent = allOutputs;
+          } else if (parsedData[0].output) {
+            // Single output case
+            aiContent = parsedData[0].output;
+          }
         }
       } catch (parseError) {
         console.error('❌ Error parsing AI response data:', parseError.message);

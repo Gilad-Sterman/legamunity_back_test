@@ -181,23 +181,41 @@ const processDraftData = async (draft, interviewId, metadata) => {
             finalStoryText = extractedData.story_text || extractedData.content || extractedData.text || '';
         }
 
-        // Extract keywords - handle both array and string formats
+        // Extract keywords - handle various formats including capitalized and hyphenated keys
         if (Array.isArray(extractedData.keywords)) {
             finalKeywords = extractedData.keywords;
+        } else if (Array.isArray(extractedData.Keywords)) {
+            finalKeywords = extractedData.Keywords;
+        } else if (Array.isArray(extractedData['key-themes'])) {
+            finalKeywords = extractedData['key-themes'];
+        } else if (Array.isArray(extractedData.keyThemes)) {
+            finalKeywords = extractedData.keyThemes;
         } else {
             finalKeywords = extractedData.key_themes || extractedData.themes || [];
         }
 
-        // Extract follow-up questions
+        // Extract follow-up questions - handle various formats including capitalized and hyphenated keys
         if (Array.isArray(extractedData.follow_ups)) {
             finalFollowUps = extractedData.follow_ups;
+        } else if (Array.isArray(extractedData['Follow-ups'])) {
+            finalFollowUps = extractedData['Follow-ups'];
+        } else if (Array.isArray(extractedData.followups)) {
+            finalFollowUps = extractedData.followups;
         } else {
             finalFollowUps = extractedData.followup_questions || extractedData.questions || [];
         }
 
-        // Extract verification data - handle the new format with capitalized keys
+        // Extract verification data - handle various formats including capitalized and hyphenated keys
+        let toVerifyData = null;
         if (extractedData.to_verify) {
-            const toVerifyData = extractedData.to_verify;
+            toVerifyData = extractedData.to_verify;
+        } else if (extractedData['To-Verify']) {
+            toVerifyData = extractedData['To-Verify'];
+        } else if (extractedData.toVerify) {
+            toVerifyData = extractedData.toVerify;
+        }
+        
+        if (toVerifyData) {
             finalToVerify.people = toVerifyData.People || toVerifyData.people || [];
             finalToVerify.places = toVerifyData.Places || toVerifyData.places || [];
             finalToVerify.organizations = toVerifyData.Organizations || toVerifyData.organizations || [];
@@ -273,7 +291,12 @@ const processDraftData = async (draft, interviewId, metadata) => {
         createdAt: new Date().toISOString()
     };
 
-    console.log('✅ Draft data processing completed', normalizedDraft);
+    console.log('✅ Draft data processing completed', {
+        title: normalizedDraft.title,
+        'content.keyThemes': normalizedDraft.content.keyThemes,
+        'content.followUps': normalizedDraft.content.followUps,
+        'content.toVerify': normalizedDraft.content.toVerify
+    });
     return normalizedDraft;
 };
 
@@ -603,7 +626,7 @@ const handleDraftWebhook = async (req, res) => {
         const { draft, metadata } = req.body;
         const interviewId = metadata?.id;
 
-        console.log('webhook controller: line 565: Processing draft webhook:', draft, metadata);
+        console.log('Processing draft webhook:', metadata);
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');

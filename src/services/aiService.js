@@ -344,11 +344,7 @@ const generateDraft = async (content, interviewMetadata) => {
       timeout: parseInt(process.env.AI_REQUEST_TIMEOUT) || 30000 // 30 seconds for immediate response
     });
 
-    const elapsedTime = Date.now() - startTime;
-    console.log(`✅ n8n AI draft generation responded in ${elapsedTime}ms`);
-
-    console.log('✅ n8n AI draft generation responded');
-    console.log(response.data);
+    console.log(`✅ n8n AI draft generation responded`);
 
     // Check if response contains full draft (output field) or just acknowledgment
     if (response.data.output) {

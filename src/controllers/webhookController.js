@@ -64,7 +64,6 @@ const updateInterviewStatus = async (interviewId, status, additionalData = {}) =
 
 // Helper function to process draft data (moved from aiService)
 const processDraftData = async (draft, interviewId, metadata) => {
-    console.log('Processing draft data:', draft, metadata);
 
     let extractedData = null;
     let rawContent = '';
@@ -80,7 +79,6 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 const jsonMatch = draftStr.match(/```json\s*([\s\S]*?)\s*```/);
                 if (jsonMatch && jsonMatch[1]) {
                     jsonContent = jsonMatch[1].trim();
-                    console.log('✅ Extracted JSON from markdown code block');
                 }
             } catch (error) {
                 console.log('⚠️ Failed to extract JSON from markdown code block:', error.message);
@@ -93,7 +91,6 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 const jsonStartIndex = draftStr.indexOf('{');
                 if (jsonStartIndex !== -1) {
                     jsonContent = draftStr.substring(jsonStartIndex);
-                    console.log(`✅ Extracted JSON after prefix: "${draftStr.substring(0, jsonStartIndex)}"`);
                 }
             } catch (error) {
                 console.log('⚠️ Failed to extract JSON after text prefix:', error.message);
@@ -102,14 +99,12 @@ const processDraftData = async (draft, interviewId, metadata) => {
         // Case 3: Draft is a plain JSON string
         else if (draftStr.startsWith('{')) {
             jsonContent = draftStr;
-            console.log('✅ Using plain JSON string');
         }
 
         // Try to parse the extracted JSON content
         if (jsonContent) {
             try {
                 extractedData = JSON.parse(jsonContent);
-                console.log('✅ Successfully parsed JSON content');
             } catch (parseError) {
                 console.log('⚠️ Failed to parse extracted JSON content:', parseError.message);
                 rawContent = draftStr; // Fall back to using raw content
@@ -124,7 +119,6 @@ const processDraftData = async (draft, interviewId, metadata) => {
     else if (draft && typeof draft === 'object' && (draft.summary_markdown || draft.title || draft.keywords)) {
         // Direct AI response format
         extractedData = draft;
-        console.log('✅ Using direct AI response object');
     }
     // Legacy handling for wrapped responses
     else if (draft.output) {
@@ -137,7 +131,6 @@ const processDraftData = async (draft, interviewId, metadata) => {
         else if (typeof outputContent === 'string' && outputContent.trim().startsWith('{')) {
             try {
                 extractedData = JSON.parse(outputContent);
-                console.log('✅ Successfully parsed direct JSON response');
             } catch (parseError) {
                 rawContent = outputContent;
             }
@@ -149,7 +142,6 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 if (jsonMatch && jsonMatch[1]) {
                     const jsonContent = jsonMatch[1].trim();
                     extractedData = JSON.parse(jsonContent);
-                    console.log('✅ Successfully parsed JSON from markdown code block');
                 }
             } catch (parseError) {
                 console.log('⚠️ Error parsing JSON from markdown, using raw content');
@@ -292,13 +284,7 @@ const processDraftData = async (draft, interviewId, metadata) => {
         version: '1.0',
         createdAt: new Date().toISOString()
     };
-
-    console.log('✅ Draft data processing completed', {
-        title: normalizedDraft.title,
-        'content.keyThemes': normalizedDraft.content.keyThemes,
-        'content.followUps': normalizedDraft.content.followUps,
-        'content.toVerify': normalizedDraft.content.toVerify
-    });
+    
     return normalizedDraft;
 };
 
@@ -942,7 +928,6 @@ const handleDraftWebhook = async (req, res) => {
         const { draft, metadata } = req.body;
         const interviewId = metadata?.id;
 
-        console.log('Processing draft webhook:', metadata);
         // Validate required fields
         if (!interviewId) {
             console.error('Missing required field: interviewId in metadata');
@@ -969,8 +954,6 @@ const handleDraftWebhook = async (req, res) => {
 
         console.log(`📝 Webhook: Draft generation ${draft ? 'completed' : 'failed'} for interview ${interviewId}`);
 
-        console.log('Draft data:', draft);
-        console.log('Metadata:', metadata);
 
         if (draft) {
             // Draft generation successful

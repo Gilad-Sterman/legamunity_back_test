@@ -457,21 +457,18 @@ const createDraftEntry = async (interviewId, processedDraft) => {
 const _processStoryData = async (story, sessionId, metadata) => {
     try {
         let startTime = Date.now();
-        console.log('Processing story data:', story);
 
         // Extract and parse AI content from response
         let aiContent = story;
 
         // Handle the case when story is an array of objects with output fields
         if (Array.isArray(story) && story.length > 0 && story[0].output) {
-            console.log('✅ Detected array of chapters with output fields');
             // Combine all outputs from the array
             const allOutputs = story
                 .filter(item => item && item.output)
                 .map(item => item.output)
                 .join('\n\n');
 
-            console.log(`✅ Combined ${story.length} chapters from AI response`);
             aiContent = allOutputs;
         }
         // Handle the new response structure: [{"output\":\"...content...\"}]
@@ -490,7 +487,6 @@ const _processStoryData = async (story, sessionId, metadata) => {
                             .map(item => item.output)
                             .join('\n\n');
 
-                        console.log(`✅ Combined ${parsedData.length} chapters from AI response`);
                         aiContent = allOutputs;
                     } else if (parsedData[0].output) {
                         // Single output case
@@ -545,7 +541,6 @@ const _processStoryData = async (story, sessionId, metadata) => {
             // First check if story object has a title property
             if (story.title) {
                 extractedTitle = story.title;
-                console.log(`📝 Using title from story object: "${extractedTitle}"`);
             } else {
                 // Try to extract from markdown headers
                 let titleMatch = aiContent.match(/^\s*#\s+([^#].+?)\s*$/m);
@@ -554,9 +549,6 @@ const _processStoryData = async (story, sessionId, metadata) => {
                 }
                 if (titleMatch && titleMatch[1]) {
                     extractedTitle = titleMatch[1];
-                    console.log(`📝 Extracted title from markdown: "${extractedTitle}"`);
-                } else {
-                    console.log(`📝 Using default title: "${extractedTitle}"`);
                 }
             }
 
@@ -680,8 +672,6 @@ const _createFullLifeStoryEntry = async (sessionId, fullLifeStory, metadata) => 
                 message: 'Session not found'
             });
         }
-        console.log('fullLifeStory', fullLifeStory);
-        console.log('metadata', metadata);
 
         const session = sessionResult.data;
         const interviews = session.interviews || [];
@@ -690,7 +680,6 @@ const _createFullLifeStoryEntry = async (sessionId, fullLifeStory, metadata) => 
 
         // Ensure title is never null by providing a fallback
         const storyTitle = fullLifeStory.title || `Life Story for Session ${sessionId} - ${new Date().toLocaleDateString()}`;
-        console.log(`📝 Using title for full life story: "${storyTitle}"`);
         const sourceMetadata = {
             approvedDrafts: metadata.approvedDrafts ? metadata.approvedDrafts.length : 0,
             totalInterviews: interviews.length,
@@ -1063,7 +1052,6 @@ const handleLifeStoryWebhook = async (req, res) => {
 
     try {
         const { story, metadata } = req.body;
-        console.log('Processing full life story webhook:', metadata);
         
         // Handle metadata that could be either a string or an object
         let parsedMetadata = metadata;

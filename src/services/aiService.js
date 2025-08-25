@@ -584,14 +584,6 @@ const generateFullLifeStory = async (fullStoryData) => {
 
     const result = response.data;
 
-    console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
-
-    // Ensure the result always has a title
-    // if (result && !result.title) {
-    //   console.log('⚠️ AI response missing title, adding default title');
-    //   result.title = `Life Story for ${fullStoryData.clientInfo?.name || 'Client'} - ${new Date().toLocaleDateString()}`;
-    // }
-
     if (result.message !== 'Workflow was started') {
       console.log('🎯 Received full life story response, triggering webhook directly');
 

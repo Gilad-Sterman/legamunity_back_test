@@ -263,8 +263,6 @@ const regenerateFullLifeStory = async (req, res) => {
     } else {
       myNote = notes[0];
     }
-
-    console.log('myNote:', myNote);
     // Get the existing story to get session info and notes
     const storyResult = await fullLifeStoriesService.getFullLifeStoryById(id);
 
@@ -392,8 +390,7 @@ const regenerateFullLifeStory = async (req, res) => {
 
     // const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
 
-    if (regeneratedStory.success) {
-
+    if (regeneratedStory.message) {
       res.json({
         success: true,
         message: 'Full life story regeneration started successfully',

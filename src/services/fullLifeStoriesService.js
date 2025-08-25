@@ -30,7 +30,6 @@ const createFullLifeStory = async (storyData) => {
     
     // Ensure title is never null by providing a fallback
     const validatedTitle = title || `Life Story for Session ${sessionId} - ${new Date().toLocaleDateString()}`;
-    console.log(`📝 [fullLifeStoriesService] Using title: "${validatedTitle}"`);
     
     // Ensure content is never null by providing a fallback
     const validatedContent = content || {
@@ -41,7 +40,6 @@ const createFullLifeStory = async (storyData) => {
         wordCount: 0
       }
     };
-    console.log(`📄 [fullLifeStoriesService] Content validation: ${validatedContent ? 'Content provided' : 'Using fallback content'}`);
     
     // First, mark any existing current version as not current
     await supabase

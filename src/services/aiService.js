@@ -331,7 +331,7 @@ const generateDraft = async (content, interviewMetadata) => {
       })
     },
     preferences: {
-      language: interviewMetadata.preferred_language,
+      language: interviewMetadata.preferred_language || 'auto-detect',
     }
   };
 

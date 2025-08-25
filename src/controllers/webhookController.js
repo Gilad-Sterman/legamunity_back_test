@@ -268,7 +268,7 @@ const processDraftData = async (draft, interviewId, metadata) => {
                 generatedAt: new Date().toISOString(),
                 sourceInterview: interviewId,
                 processingMethod: 'AI_REAL_GENERATION_V2',
-                aiModel: draft.model || 'n8n-endpoint',
+                aiModel: draft.model || 'Transcribe and generate',
                 confidence: draft.confidence || null,
                 // Preserve regeneration metadata if present
                 ...(metadata.regenerationType && {

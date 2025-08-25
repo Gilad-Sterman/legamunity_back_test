@@ -641,7 +641,7 @@ const uploadInterviewFile = async (req, res) => {
       client_name: sessionData.clientName,
       sessionId: sessionData.sessionId,
       notes: sessionData.notes || {txt: 'first attempt - no notes provided'},
-      preferred_language: sessionData.preferred_language 
+      preferred_language: sessionData.preferred_language || 'auto-detect' 
     };
 
     // console.log('Interview processed content:', processedContent);
@@ -1218,7 +1218,7 @@ const regenerateDraft = async (req, res) => {
       previousDraftId: draftId,
       adminInstructions: instructions || '',
       notes: processedNotes || [],
-      preferred_language: session.preferences.preferred_language,
+      preferred_language: session.preferences.preferred_language || 'auto-detect',
       client_name: session.client_name,
       regeneratedAt: new Date().toISOString()
     };

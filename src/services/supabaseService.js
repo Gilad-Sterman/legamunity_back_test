@@ -54,7 +54,7 @@ class SupabaseService {
             primary_contact: sessionData.primary_contact || {},
             emergency_contact: sessionData.emergency_contact || {}
           },
-          preferred_language: sessionData.preferred_language || 'english',
+          preferred_language: sessionData.preferred_language || 'auto-detect',
           special_requirements: sessionData.special_requirements || '',
           accessibility_needs: sessionData.accessibility_needs || '',
           session_type: sessionData.session_type || 'Life Story Creation',

@@ -1050,9 +1050,10 @@ const handleLifeStoryWebhook = async (req, res) => {
 
     try {
         const { story, metadata } = req.body;
-        const sessionId = metadata?.sessionId;
-
         console.log('Processing full life story webhook:', metadata);
+        
+        const sessionId = JSON.parse(metadata).sessionId;
+
         // Validate required fields
         if (!sessionId) {
             console.error('Missing required field: sessionId in metadata');

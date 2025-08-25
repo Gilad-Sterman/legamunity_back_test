@@ -350,65 +350,65 @@ const regenerateFullLifeStory = async (req, res) => {
 
     // Create new version with AI-regenerated content
     // Ensure title is never null by providing a fallback
-    const storyTitle = regeneratedStory.title || `Regenerated Life Story for Session ${story.session_id} - ${new Date().toLocaleDateString()}`;
-    console.log(`📝 [regenerateFullLifeStory] Using title: "${storyTitle}"`);
+    // const storyTitle = regeneratedStory.title || `Regenerated Life Story for Session ${story.session_id} - ${new Date().toLocaleDateString()}`;
+    // console.log(`📝 [regenerateFullLifeStory] Using title: "${storyTitle}"`);
     
-    const storyData = {
-      sessionId: story.session_id,
-      title: storyTitle, // Use validated title
-      subtitle: regeneratedStory.subtitle,
-      content: regeneratedStory.content,
-      generatedBy: userName,
-      userId: story.user_id,
-      sourceMetadata: {
-        ...story.source_metadata,
-        regeneratedFrom: story.id,
-        regenerationType: regenerationType || 'notes_based',
-        regenerationNotes: story.review_notes,
-        regenerationDate: new Date().toISOString(),
-        approvedDrafts: approvedDrafts.length,
-        totalInterviews: interviews.length,
-        completedInterviews: interviews.filter(i => i.status === 'completed').length,
-        approvedDraftIds: approvedDrafts.map(d => d.id),
-        sessionData: {
-          clientName: session.client_name,
-          clientAge: session.client_age,
-          sessionStatus: session.status
-        }
-      },
-      generationStats: {
-        processingTime: regeneratedStory.metadata?.processingTime || 0,
-        aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0',
-        sourceInterviews: approvedDrafts.length,
-        totalWords: regeneratedStory.content?.totalWords || 0,
-        estimatedPages: regeneratedStory.content?.estimatedPages || 0,
-        regenerated: true,
-        originalVersion: story.version
-      },
-      totalWords: regeneratedStory.content?.totalWords || 0,
-      processingTime: regeneratedStory.metadata?.processingTime || 0,
-      aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0'
-    };
+    // const storyData = {
+    //   sessionId: story.session_id,
+    //   title: storyTitle, // Use validated title
+    //   subtitle: regeneratedStory.subtitle,
+    //   content: regeneratedStory.content,
+    //   generatedBy: userName,
+    //   userId: story.user_id,
+    //   sourceMetadata: {
+    //     ...story.source_metadata,
+    //     regeneratedFrom: story.id,
+    //     regenerationType: regenerationType || 'notes_based',
+    //     regenerationNotes: story.review_notes,
+    //     regenerationDate: new Date().toISOString(),
+    //     approvedDrafts: approvedDrafts.length,
+    //     totalInterviews: interviews.length,
+    //     completedInterviews: interviews.filter(i => i.status === 'completed').length,
+    //     approvedDraftIds: approvedDrafts.map(d => d.id),
+    //     sessionData: {
+    //       clientName: session.client_name,
+    //       clientAge: session.client_age,
+    //       sessionStatus: session.status
+    //     }
+    //   },
+    //   generationStats: {
+    //     processingTime: regeneratedStory.metadata?.processingTime || 0,
+    //     aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0',
+    //     sourceInterviews: approvedDrafts.length,
+    //     totalWords: regeneratedStory.content?.totalWords || 0,
+    //     estimatedPages: regeneratedStory.content?.estimatedPages || 0,
+    //     regenerated: true,
+    //     originalVersion: story.version
+    //   },
+    //   totalWords: regeneratedStory.content?.totalWords || 0,
+    //   processingTime: regeneratedStory.metadata?.processingTime || 0,
+    //   aiModel: regeneratedStory.metadata?.aiModel || 'mock-ai-v1.0'
+    // };
 
-    const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
+    // const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
 
-    if (regenerationResult.success) {
+    // if (regenerationResult.success) {
 
-      res.json({
-        success: true,
-        message: 'Full life story regenerated successfully',
-        data: {
-          newVersion: regenerationResult.data,
-          originalVersion: story,
-          regenerationType: regenerationType || 'notes_based'
-        }
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: regenerationResult.error
-      });
-    }
+    //   res.json({
+    //     success: true,
+    //     message: 'Full life story regenerated successfully',
+    //     data: {
+    //       newVersion: regenerationResult.data,
+    //       originalVersion: story,
+    //       regenerationType: regenerationType || 'notes_based'
+    //     }
+    //   });
+    // } else {
+    //   res.status(500).json({
+    //     success: false,
+    //     error: regenerationResult.error
+    //   });
+    // }
 
   } catch (error) {
     console.error('❌ Error in regenerateFullLifeStory controller:', error);

@@ -549,16 +549,19 @@ const generateFullLifeStory = async (fullStoryData) => {
     throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
   }
 
+  const nyNote = fullStoryData.notes || { text: 'no notes' };
+
   // Prepare payload for the real full life story generator endpoint
   const payload = {
     operation: 'generate_full_story',
     sessionId: fullStoryData.sessionId,
+    metadata: fullStoryData,
+    notes: nyNote,
     clientInfo: fullStoryData.clientInfo,
     approvedDrafts: fullStoryData.approvedDrafts,
     sessionNotes: fullStoryData.sessionNotes,
     totalInterviews: fullStoryData.totalInterviews,
     completedInterviews: fullStoryData.completedInterviews,
-    notes: fullStoryData.notes,
     generatedAt: new Date().toISOString(),
     webhookUrl: `${process.env.SITE_URL || 'http://localhost:5000'}/api/webhooks/life-story-complete`
   };
@@ -582,12 +585,12 @@ const generateFullLifeStory = async (fullStoryData) => {
     const result = response.data;
 
     console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
-    
+
     // Ensure the result always has a title
-    if (result && !result.title) {
-      console.log('⚠️ AI response missing title, adding default title');
-      result.title = `Life Story for ${fullStoryData.clientInfo?.name || 'Client'} - ${new Date().toLocaleDateString()}`;
-    }
+    // if (result && !result.title) {
+    //   console.log('⚠️ AI response missing title, adding default title');
+    //   result.title = `Life Story for ${fullStoryData.clientInfo?.name || 'Client'} - ${new Date().toLocaleDateString()}`;
+    // }
 
     if (result.message !== 'Workflow was started') {
       console.log('🎯 Received full life story response, triggering webhook directly');

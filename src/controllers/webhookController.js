@@ -457,7 +457,7 @@ const createDraftEntry = async (interviewId, processedDraft) => {
 const _processStoryData = async (story, sessionId, metadata) => {
     try {
         let startTime = Date.now();
-        console.log('Processing story data:', story, metadata);
+        console.log('Processing story data:', story);
 
         // Extract and parse AI content from response
         let aiContent = story;
@@ -1080,15 +1080,12 @@ const handleLifeStoryWebhook = async (req, res) => {
 
         console.log(`📝 Webhook: Full life story generation ${story ? 'completed' : 'failed'} for session ${sessionId}`);
 
-        console.log('Story data:', story);
-        console.log('Metadata:', metadata);
-
         if (story) {
             // Story generation successful
             console.log(`✅ Story generation completed for session ${sessionId}`);
 
             // Extract and process the AI draft data
-            const processedStory = await _processStoryData(story, sessionId, metadata);
+            const processedStory = await _processStoryData(JSON.parse(story), sessionId, metadata);
 
             // Create draft entry in drafts table
             await _createFullLifeStoryEntry(sessionId, processedStory, metadata);

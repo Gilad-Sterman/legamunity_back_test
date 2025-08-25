@@ -352,7 +352,7 @@ const regenerateFullLifeStory = async (req, res) => {
     // Ensure title is never null by providing a fallback
     // const storyTitle = regeneratedStory.title || `Regenerated Life Story for Session ${story.session_id} - ${new Date().toLocaleDateString()}`;
     // console.log(`📝 [regenerateFullLifeStory] Using title: "${storyTitle}"`);
-    
+
     // const storyData = {
     //   sessionId: story.session_id,
     //   title: storyTitle, // Use validated title
@@ -392,23 +392,21 @@ const regenerateFullLifeStory = async (req, res) => {
 
     // const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
 
-    // if (regenerationResult.success) {
+    if (regenerationResult.success) {
 
-    //   res.json({
-    //     success: true,
-    //     message: 'Full life story regenerated successfully',
-    //     data: {
-    //       newVersion: regenerationResult.data,
-    //       originalVersion: story,
-    //       regenerationType: regenerationType || 'notes_based'
-    //     }
-    //   });
-    // } else {
-    //   res.status(500).json({
-    //     success: false,
-    //     error: regenerationResult.error
-    //   });
-    // }
+      res.json({
+        success: true,
+        message: 'Full life story regeneration started successfully',
+        data: {
+          originalVersion: story,
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to start full life story regeneration'
+      });
+    }
 
   } catch (error) {
     console.error('❌ Error in regenerateFullLifeStory controller:', error);

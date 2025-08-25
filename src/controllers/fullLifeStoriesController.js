@@ -392,7 +392,7 @@ const regenerateFullLifeStory = async (req, res) => {
 
     // const regenerationResult = await fullLifeStoriesService.createFullLifeStory(storyData);
 
-    if (regenerationResult.success) {
+    if (regeneratedStory.success) {
 
       res.json({
         success: true,

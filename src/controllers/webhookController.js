@@ -462,8 +462,20 @@ const _processStoryData = async (story, sessionId, metadata) => {
         // Extract and parse AI content from response
         let aiContent = story;
 
-        // Handle the new response structure: [{ data: "[{\"output\":\"...content...\"}]"}]
-        if (Array.isArray(story) && story.length > 0 && story[0].data) {
+        // Handle the case when story is an array of objects with output fields
+        if (Array.isArray(story) && story.length > 0 && story[0].output) {
+            console.log('✅ Detected array of chapters with output fields');
+            // Combine all outputs from the array
+            const allOutputs = story
+                .filter(item => item && item.output)
+                .map(item => item.output)
+                .join('\n\n');
+
+            console.log(`✅ Combined ${story.length} chapters from AI response`);
+            aiContent = allOutputs;
+        }
+        // Handle the new response structure: [{"output\":\"...content...\"}]
+        else if (Array.isArray(story) && story.length > 0 && story[0].data) {
             try {
                 // Parse the JSON string in data field
                 const parsedData = JSON.parse(story[0].data);
@@ -678,8 +690,20 @@ const _createFullLifeStoryEntry = async (sessionId, fullLifeStory, metadata) => 
 
         // Ensure title is never null by providing a fallback
         const storyTitle = fullLifeStory.title || `Life Story for Session ${sessionId} - ${new Date().toLocaleDateString()}`;
-        console.log(`📝 Using title for full life story: "${storyTitle}"`); 
-        
+        console.log(`📝 Using title for full life story: "${storyTitle}"`);
+        const sourceMetadata = {
+            approvedDrafts: metadata.approvedDrafts ? metadata.approvedDrafts.length : 0,
+            totalInterviews: interviews.length,
+            completedInterviews: interviews.filter(i => i.status === 'completed').length,
+            generationDate: new Date().toISOString(),
+            approvedDraftIds: metadata.approvedDrafts ? metadata.approvedDrafts.map(d => d.id) : [],
+            sessionData: {
+                clientName: session.client_name,
+                clientAge: session.client_age,
+                sessionStatus: session.status
+            }
+        };
+
         const storyData = {
             sessionId,
             title: storyTitle, // Use validated title
@@ -687,22 +711,11 @@ const _createFullLifeStoryEntry = async (sessionId, fullLifeStory, metadata) => 
             content: fullLifeStory.content,
             generatedBy: metadata.user?.email || 'admin',
             userId: metadata.user?.id || null,
-            sourceMetadata: {
-                approvedDrafts: metadata.approvedDrafts.length,
-                totalInterviews: interviews.length,
-                completedInterviews: interviews.filter(i => i.status === 'completed').length,
-                generationDate: new Date().toISOString(),
-                approvedDraftIds: metadata.approvedDrafts.map(d => d.id),
-                sessionData: {
-                    clientName: session.client_name,
-                    clientAge: session.client_age,
-                    sessionStatus: session.status
-                }
-            },
+            sourceMetadata,
             generationStats: {
                 processingTime: metadata?.processingTime || 0,
                 aiModel: metadata?.aiModel || 'mock-ai-v1.0',
-                sourceInterviews: metadata.approvedDrafts.length,
+                sourceInterviews: metadata?.approvedDrafts ? metadata.approvedDrafts.length : 0,
                 totalWords: fullLifeStory.content?.totalWords || 0,
                 estimatedPages: fullLifeStory.content?.estimatedPages || 0
             },
@@ -1052,7 +1065,17 @@ const handleLifeStoryWebhook = async (req, res) => {
         const { story, metadata } = req.body;
         console.log('Processing full life story webhook:', metadata);
         
-        const sessionId = JSON.parse(metadata).sessionId;
+        // Handle metadata that could be either a string or an object
+        let parsedMetadata = metadata;
+        if (typeof metadata === 'string') {
+            try {
+                parsedMetadata = JSON.parse(metadata);
+            } catch (parseError) {
+                console.error('Error parsing metadata string:', parseError);
+            }
+        }
+        
+        const sessionId = parsedMetadata.sessionId;
 
         // Validate required fields
         if (!sessionId) {
@@ -1084,11 +1107,22 @@ const handleLifeStoryWebhook = async (req, res) => {
             // Story generation successful
             console.log(`✅ Story generation completed for session ${sessionId}`);
 
+            // Handle story that could be either a string or an object
+            let parsedStory = story;
+            if (typeof story === 'string') {
+                try {
+                    parsedStory = JSON.parse(story);
+                } catch (parseError) {
+                    console.error('Error parsing story string:', parseError);
+                    // Keep original string if parsing fails
+                }
+            }
+
             // Extract and process the AI draft data
-            const processedStory = await _processStoryData(JSON.parse(story), sessionId, metadata);
+            const processedStory = await _processStoryData(parsedStory, sessionId, parsedMetadata);
 
             // Create draft entry in drafts table
-            await _createFullLifeStoryEntry(sessionId, processedStory, metadata);
+            await _createFullLifeStoryEntry(sessionId, processedStory, parsedMetadata);
 
             console.log(`🎉 Full life story processing completed successfully via webhook`);
 

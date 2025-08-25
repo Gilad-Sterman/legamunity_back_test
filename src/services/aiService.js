@@ -346,23 +346,23 @@ const generateDraft = async (content, interviewMetadata) => {
 
     const elapsedTime = Date.now() - startTime;
     console.log(`✅ n8n AI draft generation responded in ${elapsedTime}ms`);
-    
+
     console.log('✅ n8n AI draft generation responded');
     console.log(response.data);
-    
+
     // Check if response contains full draft (output field) or just acknowledgment
     if (response.data.output) {
       console.log('🎯 Received full draft response, triggering webhook directly');
-      
+
       // Trigger webhook directly with the draft data
       const webhookPayload = {
         draft: response.data,
         metadata: { id: interviewMetadata.id }
       };
-      
+
       // Call our own webhook endpoint
       const webhookUrl = `https://legamunity-test.onrender.com/api/webhooks/draft-complete`;
-      
+
       try {
         await axios.post(webhookUrl, webhookPayload, {
           headers: { 'Content-Type': 'application/json' },
@@ -373,90 +373,24 @@ const generateDraft = async (content, interviewMetadata) => {
         console.error('❌ Error triggering draft webhook:', webhookError.message);
       }
     }
-    
+
     return response.data; // Return immediate response from n8n
   } catch (error) {
-      const elapsedTime = Date.now() - startTime;
-      console.error(`❌ AI request failed after ${elapsedTime}ms: ${error.message}`);
-      if (error.code === 'ECONNABORTED') {
-        console.error('🕐 Request timed out - AI processing took longer than expected');
-      } else if (error.response) {
-        // Log only essential response error information
-        console.error(`Response error: Status ${error.response.status} - ${error.response.statusText}`);
-      }
-      // Create a cleaner error object with just the essential information
-      const cleanError = new Error(`AI draft generation failed: ${error.message}`);
-      cleanError.code = error.code;
-      cleanError.status = error.response?.status;
-      throw cleanError;
+    const elapsedTime = Date.now() - startTime;
+    console.error(`❌ AI request failed after ${elapsedTime}ms: ${error.message}`);
+    if (error.code === 'ECONNABORTED') {
+      console.error('🕐 Request timed out - AI processing took longer than expected');
+    } else if (error.response) {
+      // Log only essential response error information
+      console.error(`Response error: Status ${error.response.status} - ${error.response.statusText}`);
+    }
+    // Create a cleaner error object with just the essential information
+    const cleanError = new Error(`AI draft generation failed: ${error.message}`);
+    cleanError.code = error.code;
+    cleanError.status = error.response?.status;
+    throw cleanError;
   }
 };
-
-    // Calculate word count from the actual content
-    // const totalContent = Object.values(extractedSections).join(' ') + ' ' + extractedSummary;
-    // const calculatedWordCount = totalContent.split(/\s+/).filter(word => word.length > 0).length;
-    // const estimatedReadingTime = Math.max(1, Math.ceil(calculatedWordCount / 250)); // 250 words per minute
-
-    // Extract title from AI content or use default
-    // let finalTitle = '';
-    // if (normalizedContent && normalizedContent.includes('**Title**:')) {
-    //   const titleMatch = normalizedContent.match(/\*\*Title\*\*:\s*([^\n]+)/i);
-    //   if (titleMatch) {
-    //     finalTitle = titleMatch[1].trim();
-    //   }
-    // }
-
-    // if (!finalTitle) {
-    //   finalTitle = parsedContent?.title || result.title || `Life Story Draft - ${interviewMetadata.name || interviewMetadata.clientName || 'Interview'} ${new Date().toLocaleDateString()}`;
-    // }
-
-    // Normalize the response format to match expected structure
-    // const normalizedDraft = {
-    //   title: finalTitle,
-    //   content: {
-    //     summary: extractedSummary || aiGeneratedContent.substring(0, 200) + '...' || 'AI-generated summary from real endpoint',
-    //     sections: Object.keys(extractedSections).length > 0 ?
-    //       // Filter out sections with minimal/empty content
-    //       Object.fromEntries(
-    //         Object.entries(extractedSections).filter(([key, content]) => {
-    //           const cleanContent = content.trim();
-    //           // Remove sections that are just "|", empty, or contain only special characters/whitespace
-    //           return cleanContent.length > 2 &&
-    //             cleanContent !== '|' &&
-    //             cleanContent !== '||' &&
-    //             cleanContent !== '|||' &&
-    //             !(/^[\s\|\-\*\#]*$/.test(cleanContent)) && // Only whitespace, pipes, dashes, asterisks, hashes
-    //             !key.toLowerCase().includes('to-verify') && // Remove To-Verify sections
-    //             !key.toLowerCase().includes('toverify');
-    //         })
-    //       ) : {
-    //         introduction: 'AI-generated introduction',
-    //         mainStory: aiGeneratedContent || 'AI-generated main story',
-    //         conclusion: 'AI-generated conclusion'
-    //       },
-    //     keyThemes: extractedKeywords.length > 0 ? extractedKeywords : [],
-    //     followUps: extractedFollowUps.length > 0 ? extractedFollowUps : [],
-    //     toVerify: Object.keys(extractedToVerify).length > 0 ? extractedToVerify : {},
-    //     categories: extractedCategories.length > 0 ? extractedCategories : [],
-    //     metadata: {
-    //       wordCount: calculatedWordCount,
-    //       estimatedReadingTime: `${estimatedReadingTime} minutes`,
-    //       generatedAt: new Date().toISOString(),
-    //       sourceInterview: interviewMetadata.id,
-    //       processingMethod: 'AI_REAL_GENERATION',
-    //       aiModel: result.model || result.aiModel || 'n8n-endpoint',
-    //       confidence: result.confidence || null,
-    //       endpointUrl: draftEndpointUrl
-    //     }
-    //   },
-    //   status: result.status || 'draft',
-    //   version: result.version || '1.0',
-    //   createdAt: new Date().toISOString()
-    // };
-
-    // return normalizedDraft;
-//   });
-// };
 
 /**
  * Main processing function that handles the complete workflow
@@ -608,246 +542,95 @@ const generateFullLifeStory = async (fullStoryData) => {
   console.log('🤖 AI Service: Generating full life story...');
   const startTime = Date.now();
 
-  if (config.ai.mockMode) {
-    return mockGenerateFullLifeStory(fullStoryData);
+  // Determine which endpoint URL to use
+  const fullStoryEndpointUrl = process.env.AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL;
+
+  if (!fullStoryEndpointUrl) {
+    throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
   }
 
-  return withRetry(async () => {
-    // Determine which endpoint URL to use
-    const fullStoryEndpointUrl = process.env.AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL;
+  // Prepare payload for the real full life story generator endpoint
+  const payload = {
+    operation: 'generate_full_story',
+    sessionId: fullStoryData.sessionId,
+    clientInfo: fullStoryData.clientInfo,
+    approvedDrafts: fullStoryData.approvedDrafts,
+    sessionNotes: fullStoryData.sessionNotes,
+    totalInterviews: fullStoryData.totalInterviews,
+    completedInterviews: fullStoryData.completedInterviews,
+    notes: fullStoryData.notes,
+    generatedAt: new Date().toISOString(),
+    webhookUrl: `${process.env.SITE_URL || 'http://localhost:5000'}/api/webhooks/life-story-complete`
+  };
 
-    if (!fullStoryEndpointUrl) {
-      throw new Error('AI_FULL_LIFE_STORY_GENERETOR_ENDPOINT_URL not configured');
-    }
+  const headers = {
+    'Content-Type': 'application/json',
+  };
 
-    // console.log('🤖 Using full life story endpoint:', fullStoryEndpointUrl);
+  // Add API key if configured
+  if (config.ai.apiKey) {
+    headers['Authorization'] = `Bearer ${config.ai.apiKey}`;
+  }
 
-    // Prepare payload for the real full life story generator endpoint
-    const payload = {
-      operation: 'generate_full_story',
-      sessionId: fullStoryData.sessionId,
-      clientInfo: fullStoryData.clientInfo,
-      approvedDrafts: fullStoryData.approvedDrafts,
-      sessionNotes: fullStoryData.sessionNotes,
-      totalInterviews: fullStoryData.totalInterviews,
-      completedInterviews: fullStoryData.completedInterviews,
-      notes: fullStoryData.notes,
-      generatedAt: new Date().toISOString()
-    };
-
-    console.log('PAYLOAD:', payload);
-
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-
-    // Add API key if configured
-    if (config.ai.apiKey) {
-      headers['Authorization'] = `Bearer ${config.ai.apiKey}`;
-    }
-
-    // console.log('🚀 Calling real full life story generator endpoint...');
-    // console.log('📤 PAYLOAD:', JSON.stringify(payload, null, 2));
-
-    // Call the real full life story generator endpoint
+  // Call the real full life story generator endpoint
+  try {
     const response = await axios.post(fullStoryEndpointUrl, payload, {
       headers,
       timeout: config.ai.requestTimeout,
     });
 
     const result = response.data;
-    // console.log('✅ Real AI full life story generation completed successfully');
+
     console.log('🔍 RAW AI ENDPOINT RESPONSE:', JSON.stringify(result, null, 2));
+    
+    // Ensure the result always has a title
+    if (result && !result.title) {
+      console.log('⚠️ AI response missing title, adding default title');
+      result.title = `Life Story for ${fullStoryData.clientInfo?.name || 'Client'} - ${new Date().toLocaleDateString()}`;
+    }
 
-    // Extract and parse AI content from response
-    let aiContent = result;
+    if (result.message !== 'Workflow was started') {
+      console.log('🎯 Received full life story response, triggering webhook directly');
 
-    // Handle the new response structure: [{ data: "[{\"output\":\"...content...\"}]"}]
-    if (Array.isArray(result) && result.length > 0 && result[0].data) {
+      // Trigger webhook directly with the draft data
+      const webhookPayload = {
+        story: response.data,
+        metadata: fullStoryData
+      };
+
+      // Call our own webhook endpoint
+      const webhookUrl = `${process.env.SITE_URL || 'http://localhost:5000'}/api/webhooks/life-story-complete`;
+
+      console.log('🎯 Triggering full life story webhook with full response', webhookUrl);
+
       try {
-        // Parse the JSON string in data field
-        const parsedData = JSON.parse(result[0].data);
-        
-        // Extract all outputs from the parsed data array
-        if (Array.isArray(parsedData) && parsedData.length > 0) {
-          // Check if we have multiple outputs to combine
-          if (parsedData.length > 1) {
-            // Combine all outputs from the array
-            const allOutputs = parsedData
-              .filter(item => item && item.output)
-              .map(item => item.output)
-              .join('\n\n');
-            
-            console.log(`✅ Combined ${parsedData.length} chapters from AI response`);
-            aiContent = allOutputs;
-          } else if (parsedData[0].output) {
-            // Single output case
-            aiContent = parsedData[0].output;
-          }
-        }
-      } catch (parseError) {
-        console.error('❌ Error parsing AI response data:', parseError.message);
-        console.log('⚠️ Using raw result as fallback');
-      }
-    }
-    // Handle legacy response formats
-    else if (result.output) {
-      aiContent = result.output;
-    }
-    // Handle nested response structure (similar to draft generator)
-    else if (result.result) {
-      if (result.result.message?.content) {
-        aiContent = result.result.message.content;
-      } else if (result.result.output) {
-        aiContent = result.result.output;
-      } else if (result.result.content) {
-        aiContent = result.result.content;
-      } else {
-        aiContent = result.result;
-      }
-    }
 
-    // If content is wrapped in markdown code blocks, extract it
-    if (typeof aiContent === 'string' && aiContent.includes('```json')) {
-      const jsonMatch = aiContent.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        try {
-          aiContent = JSON.parse(jsonMatch[1]);
-        } catch (parseError) {
-          console.warn('⚠️ Failed to parse JSON from markdown, using raw content');
-        }
-      }
-    }
-
-    const processingTime = Date.now() - startTime;
-    // console.log(`✅ AI Service: Full life story generated in ${processingTime}ms`);
-
-    // Normalize the response structure
-
-    // Extract title from markdown if content is a string with markdown headers
-    let extractedTitle = 'Generated Life Story';
-    let extractedChapters = [];
-    let extractedThemes = [];
-
-    if (typeof aiContent === 'string') {
-      // Extract title from first markdown header (# Title or ## Title)
-      // First try to find a level 1 header
-      let titleMatch = aiContent.match(/^\s*#\s+([^#].+?)\s*$/m);
-      
-      // If no level 1 header found, try to find the first level 2 header
-      if (!titleMatch) {
-        titleMatch = aiContent.match(/^\s*##\s+(.+?)\s*$/m);
-      }
-      
-      if (titleMatch && titleMatch[1]) {
-        extractedTitle = titleMatch[1].trim();
-      }
-
-      // Extract chapters from markdown (## Chapter)
-      // Use a more robust regex that handles multiline content between chapters
-      // This improved pattern ensures we capture all content between chapter headers
-      // and handles various markdown formatting styles
-      const chapterRegex = /##\s+([^\n]+)\s*\n([\s\S]*?)(?=\s*##\s+|\s*$)/g;
-      const chapterMatches = [...aiContent.matchAll(chapterRegex)];
-      if (chapterMatches) {
-        for (const match of chapterMatches) {
-          if (match[1] && match[2]) {
-            extractedChapters.push({
-              title: match[1].trim(),
-              content: match[2].trim()
-            });
-          }
-        }
-      }
-
-      // Extract potential themes from content
-      // Look for common theme indicators in the text - both English and Hebrew
-      extractedThemes = [];
-      const themeIndicators = [
-        // English themes
-        'childhood', 'family', 'career', 'education', 'relationships', 'achievements',
-        'challenges', 'travel', 'hobbies', 'community', 'immigration', 'military',
-        'parenthood', 'wisdom', 'lessons', 'heritage', 'culture', 'religion', 'spirituality',
-        // Hebrew themes
-        'ילדות', 'משפחה', 'קריירה', 'חינוך', 'לימודים', 'יחסים', 'הישגים',
-        'אתגרים', 'נסיעות', 'תחביבים', 'קהילה', 'עלייה', 'הגירה', 'צבא',
-        'הורות', 'חוכמה', 'לקחים', 'מורשת', 'תרבות', 'דת', 'רוחניות',
-        // Additional context-specific themes
-        'הונגריה', 'ישראל', 'מדריך', 'נוער', 'טכנולוגיה', 'פיתוח', 'תיכון', 'ישיבה'
-      ];
-
-      themeIndicators.forEach(theme => {
-        // Check for theme in content with appropriate word boundaries
-        // For Hebrew text, we need a different approach as \b doesn't work well with Hebrew
-        let themeRegex;
-
-        // Check if theme contains Hebrew characters
-        if (/[\u0590-\u05FF]/.test(theme)) {
-          // For Hebrew, use simple string matching with escaping special regex characters
-          const escapedTheme = theme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          // Use a simpler approach that avoids character class issues
-          // Create a simpler regex pattern with properly escaped special characters
-          // Use a very simple pattern to avoid any regex issues
-          themeRegex = new RegExp('(^| )' + escapedTheme + '($| |\\.|,|:|;|\\?|!)', 'i');
-        } else {
-          // For English, use standard word boundaries
-          themeRegex = new RegExp(`\\b${theme}\\b`, 'i');
-        }
-
-        if (themeRegex.test(aiContent)) {
-          extractedThemes.push(theme);
-        }
-      });
-
-      // Also check chapter titles for themes
-      extractedChapters.forEach(chapter => {
-        themeIndicators.forEach(theme => {
-          // Use the same improved regex pattern for chapter titles
-          let themeRegex;
-
-          // Check if theme contains Hebrew characters
-          if (/[\u0590-\u05FF]/.test(theme)) {
-            // For Hebrew, use simple string matching with escaping special regex characters
-            const escapedTheme = theme.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Use a simpler approach that avoids character class issues
-            // Create a simpler regex pattern with properly escaped special characters
-            // Use a very simple pattern to avoid any regex issues
-            themeRegex = new RegExp('(^| )' + escapedTheme + '($| |\\.|,|:|;|\\?|!)', 'i');
-          } else {
-            // For English, use standard word boundaries
-            themeRegex = new RegExp(`\\b${theme}\\b`, 'i');
-          }
-
-          if (themeRegex.test(chapter.title) && !extractedThemes.includes(theme)) {
-            extractedThemes.push(theme);
-          }
+        await axios.post(webhookUrl, webhookPayload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000
         });
-      });
+        console.log('✅ Successfully triggered full life story webhook with full response');
+      } catch (webhookError) {
+        console.error('❌ Error triggering full life story webhook:', webhookError.message);
+      }
     }
 
-    const normalizedStory = {
-      title: aiContent.title || aiContent.storyTitle || extractedTitle,
-      content: aiContent.content || aiContent.story || aiContent,
-      chapters: aiContent.chapters || extractedChapters || [],
-      timeline: aiContent.timeline || [],
-      keyMoments: aiContent.keyMoments || aiContent.highlights || [],
-      themes: aiContent.themes || aiContent.keyThemes || extractedThemes || [],
-      status: 'generated',
-      version: 1,
-      metadata: {
-        processingTime,
-        generatedAt: new Date().toISOString(),
-        wordCount: typeof aiContent === 'string' ? aiContent.split(/\s+/).length : 0,
-        aiModel: aiContent.metadata?.aiModel || 'n8n-workflow',
-        sourceSessionId: fullStoryData.sessionId,
-        basedOnDrafts: fullStoryData.approvedDrafts?.length || 0,
-        totalInterviews: fullStoryData.totalInterviews || 0,
-        completedInterviews: fullStoryData.completedInterviews || 0
-      }
-    };
-
-    return normalizedStory;
-  });
+    return result;
+  } catch (error) {
+    const elapsedTime = Date.now() - startTime;
+    console.error(`❌ AI request failed after ${elapsedTime}ms: ${error.message}`);
+    if (error.code === 'ECONNABORTED') {
+      console.error('🕐 Request timed out - AI processing took longer than expected');
+    } else if (error.response) {
+      // Log only essential response error information
+      console.error(`Response error: Status ${error.response.status} - ${error.response.statusText}`);
+    }
+    // Create a cleaner error object with just the essential information
+    const cleanError = new Error(`AI full life story generation failed: ${error.message}`);
+    cleanError.code = error.code;
+    cleanError.status = error.response?.status;
+    throw cleanError;
+  }
 };
 
 /**

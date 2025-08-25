@@ -1001,87 +1001,46 @@ const generateFullLifeStory = async (req, res) => {
 
     // console.log('🤖 Full life story data:', fullStoryData);
 
+    if (global.io) {
+      const broadcastData = {
+        sessionId: sessionId,
+        stage: 'generating-full-life-story',
+        timestamp: new Date().toISOString()
+      };
+
+      global.io.emit('full-life-story-generation-started', broadcastData);
+      console.log(`📡 WebSocket broadcast sent for full life story generation started: ${sessionId}`);
+    }
+    
     const fullLifeStory = await aiService.generateFullLifeStory(fullStoryData);
 
-    // Step 4: Save to dedicated full_life_stories table
-    const fullLifeStoriesService = require('../services/fullLifeStoriesService');
+    // AI Generated Draft Structure validation (removed verbose logging)
 
-    const storyData = {
-      sessionId,
-      title: fullLifeStory.title,
-      subtitle: fullLifeStory.subtitle,
-      content: fullLifeStory.content,
-      generatedBy: req.user?.email || 'admin',
-      userId: req.user?.id || null,
-      sourceMetadata: {
-        approvedDrafts: approvedDrafts.length,
-        totalInterviews: interviews.length,
-        completedInterviews: interviews.filter(i => i.status === 'completed').length,
-        generationDate: new Date().toISOString(),
-        approvedDraftIds: approvedDrafts.map(d => d.id),
-        sessionData: {
-          clientName: session.client_name,
-          clientAge: session.client_age,
-          sessionStatus: session.status
-        }
-      },
-      generationStats: {
-        processingTime: fullLifeStory.metadata?.processingTime || 0,
-        aiModel: fullLifeStory.metadata?.aiModel || 'mock-ai-v1.0',
-        sourceInterviews: approvedDrafts.length,
-        totalWords: fullLifeStory.content?.totalWords || 0,
-        estimatedPages: fullLifeStory.content?.estimatedPages || 0
-      },
-      totalWords: fullLifeStory.content?.totalWords || 0,
-      processingTime: fullLifeStory.metadata?.processingTime || 0,
-      aiModel: fullLifeStory.metadata?.aiModel || 'mock-ai-v1.0'
-    };
-
-    const saveResult = await fullLifeStoriesService.createFullLifeStory(storyData);
-
-    if (!saveResult.success) {
-      console.error('Failed to save full life story to database:', saveResult.error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to save generated full life story',
-        error: saveResult.error
-      });
-    }
-
-    // Step 5: Log the generation event
-    try {
-      await req.logEvent({
-        eventType: 'session',
-        eventAction: 'full_story_generated',
-        sessionId: sessionId,
-        resourceId: saveResult.data.id,
-        resourceType: 'full_life_story',
-        eventData: {
-          story_id: saveResult.data.id,
-          version: saveResult.data.version,
-          source_drafts: approvedDrafts.length,
-          total_words: fullLifeStory.content?.totalWords || 0,
-          processing_time: fullLifeStory.metadata?.processingTime || 0
-        },
-        severity: 'info'
-      });
-    } catch (logError) {
-      console.error('Failed to log full story generation:', logError);
-    }
-
+    // The regenerated draft will be processed by the webhook and createDraftEntry
+    // which will handle the regeneration logic and WebSocket events
+    
     res.status(200).json({
       success: true,
-      message: 'Full life story generated successfully',
+      message: 'Full life story generation started',
       data: {
-        story: saveResult.data,
-        session: session,
-        generationStats: {
-          totalWords: fullLifeStory.content?.totalWords || 0,
-          processingTime: fullLifeStory.metadata?.processingTime || 0,
-          sourceDrafts: approvedDrafts.length
-        }
+        stage: 'processing',
+        sessionId: sessionId,
       }
     });
+
+    // res.status(200).json({
+    //   success: true,
+    //   message: 'Full life story generated successfully',
+    //   data: {
+    //     story: saveResult.data,
+    //     session: session,
+    //     generationStats: {
+    //       totalWords: fullLifeStory.content?.totalWords || 0,
+    //       processingTime: fullLifeStory.metadata?.processingTime || 0,
+    //       sourceDrafts: approvedDrafts.length
+    //     }
+    //   }
+    // });
 
   } catch (error) {
     console.error('Error in generateFullLifeStory:', error);

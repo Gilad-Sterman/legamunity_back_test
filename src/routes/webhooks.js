@@ -43,4 +43,18 @@ router.post('/transcription-complete', webhookController.handleTranscriptionWebh
  */
 router.post('/draft-complete', webhookController.handleDraftWebhook);
 
+/**
+ * @route POST /api/webhooks/life-story-complete
+ * @desc Handle life story generation completion callback from n8n AI workflow
+ * @access Public (with validation)
+ * @body {
+ *   interviewId: string,
+ *   lifeStory: object,
+ *   success: boolean,
+ *   error?: string,
+ *   metadata?: object
+ * }
+ */
+router.post('/life-story-complete', webhookController.handleLifeStoryWebhook);
+
 module.exports = router;

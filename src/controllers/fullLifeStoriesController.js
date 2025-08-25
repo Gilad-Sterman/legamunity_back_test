@@ -349,9 +349,13 @@ const regenerateFullLifeStory = async (req, res) => {
     const regeneratedStory = await aiService.generateFullLifeStory(fullStoryData);
 
     // Create new version with AI-regenerated content
+    // Ensure title is never null by providing a fallback
+    const storyTitle = regeneratedStory.title || `Regenerated Life Story for Session ${story.session_id} - ${new Date().toLocaleDateString()}`;
+    console.log(`📝 [regenerateFullLifeStory] Using title: "${storyTitle}"`);
+    
     const storyData = {
       sessionId: story.session_id,
-      title: regeneratedStory.title,
+      title: storyTitle, // Use validated title
       subtitle: regeneratedStory.subtitle,
       content: regeneratedStory.content,
       generatedBy: userName,

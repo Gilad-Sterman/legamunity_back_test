@@ -1,4 +1,5 @@
 const supabase = require('../config/database');
+const loggingService = require('./loggingService');
 
 class SupabaseService {
   constructor() {
@@ -1150,6 +1151,22 @@ class SupabaseService {
         .single();
 
       if (error) throw error;
+      
+      // Log successful draft creation
+      await loggingService.logDraftCreated(
+        draftData.created_by || null,
+        null, // client email not directly available here
+        draftData.session_id,
+        data.id,
+        {
+          version: data.version,
+          stage: data.stage,
+          contentLength: JSON.stringify(data.content).length
+        },
+        null, // IP address not available in service layer
+        null  // User agent not available in service layer
+      );
+      
       return { success: true, data };
     } catch (error) {
       console.error('Error creating draft:', error);

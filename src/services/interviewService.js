@@ -1,4 +1,5 @@
 const supabase = require('../config/database');
+const loggingService = require('./loggingService');
 
 class InterviewService {
   

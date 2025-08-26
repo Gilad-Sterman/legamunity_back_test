@@ -233,6 +233,26 @@ class LoggingService {
   }
 
   // Draft Generation Events
+  async logDraftCreated(userId, userEmail, sessionId, draftId, draftData, ipAddress, userAgent) {
+    return this.logEvent({
+      eventType: 'draft',
+      eventAction: 'created',
+      userId,
+      userEmail,
+      sessionId,
+      resourceId: draftId,
+      resourceType: 'draft',
+      ipAddress,
+      userAgent,
+      eventData: {
+        version: draftData.version,
+        stage: draftData.stage,
+        contentLength: draftData.contentLength
+      },
+      severity: 'info'
+    });
+  }
+
   async logDraftGenerated(userId, userEmail, sessionId, interviewId, draftData, ipAddress, userAgent) {
     return this.logEvent({
       eventType: 'draft',

@@ -4,6 +4,7 @@
  */
 
 const supabase = require('../config/database');
+const loggingService = require('./loggingService');
 
 /**
  * Create a new full life story (with automatic versioning)
@@ -93,6 +94,26 @@ const createFullLifeStory = async (storyData) => {
     }
     
     console.log('✅ Full life story created successfully:', data.id);
+    
+    // Log the full life story creation event
+    await loggingService.logEvent({
+      eventType: 'draft',
+      eventAction: 'created',
+      userId,
+      sessionId,
+      resourceId: data.id,
+      resourceType: 'full_life_story',
+      eventData: {
+        title: validatedTitle,
+        version: nextVersion,
+        totalWords,
+        totalPages: Math.ceil((totalWords || 0) / 250),
+        processingTime,
+        aiModel
+      },
+      severity: 'info'
+    });
+    
     return {
       success: true,
       data: data

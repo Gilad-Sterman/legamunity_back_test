@@ -978,6 +978,23 @@ class SupabaseService {
         .gte('updated_at', sevenDaysAgo.toISOString());
 
       if (recentDraftsError) throw recentDraftsError;
+      
+      // Get recent activity logs (last 7 days, limit to 10 most recent)
+      // Filter out login activities and focus on more meaningful events
+      const { data: recentLogs, error: recentLogsError } = await supabase
+        .from('logs')
+        .select('id, event_type, event_action, user_id, user_email, session_id, created_at, severity, event_data')
+        .gte('created_at', sevenDaysAgo.toISOString())
+        .not('event_type', 'eq', 'auth') // Filter out authentication events
+        .not('event_action', 'eq', 'login') // Explicitly filter out login events
+        .not('event_action', 'eq', 'logout') // Filter out logout events too
+        .order('created_at', { ascending: false })
+        .limit(15); // Increased limit since we're filtering out some events
+        
+      if (recentLogsError) {
+        console.error('Error fetching recent logs:', recentLogsError);
+        // Continue execution even if logs fetch fails
+      }
 
       // ==================== LIFE STORY STATISTICS ====================
       
@@ -1099,6 +1116,7 @@ class SupabaseService {
           // Recent activity
           recentInterviews,
           recentDrafts,
+          recentLogs: recentLogs || [], // Add recent logs to the response
           
           // Legacy metrics for backward compatibility
           pendingReview: draftsAwaitingApproval,

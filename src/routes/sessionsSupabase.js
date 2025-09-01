@@ -77,21 +77,34 @@ router.get('/interviews/:id/status', sessionController.getInterviewStatus);
 
 // Upload file for interview
 const multer = require('multer');
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 100 * 1024 * 1024 // 100MB limit
   },
   fileFilter: (req, file, cb) => {
+
+    try {
+      // Try to decode if it's URL-encoded
+      if (file.originalname.includes('%')) {
+        file.originalname = decodeURIComponent(file.originalname);
+      }
+      // Ensure proper UTF-8 encoding
+      file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    } catch (error) {
+      console.log('Filename encoding error, using original:', error);
+    }
+
+    console.log('Original filename after decoding:', file.originalname);
     // Allow audio and text files
     const allowedTypes = [
-      'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/3gp', 'audio/m4a','audio/x-m4a', 'audio/3gpp', 'audio/3gpp2', 'audio/flac',
-      'text/plain', 'text/markdown', 'application/pdf', 'application/msword', 
+      'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/webm', 'audio/3gp', 'audio/m4a', 'audio/x-m4a', 'audio/3gpp', 'audio/3gpp2', 'audio/flac',
+      'text/plain', 'text/markdown', 'application/pdf', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ];
 
     console.log('File type:', file.mimetype);
-    
+
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {

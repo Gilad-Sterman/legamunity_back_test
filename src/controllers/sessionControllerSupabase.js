@@ -221,7 +221,8 @@ const updateSession = async (req, res) => {
     const updateData = req.body;
 
     // Add metadata
-    updateData.updated_by = req.user.uid;
+    // updateData.updated_by = req.user.uid;
+    console.log('Updating session:', id, updateData);
 
     const result = await supabaseService.updateSession(id, updateData);
 
@@ -240,7 +241,7 @@ const updateSession = async (req, res) => {
     }
 
     // Log session update
-    await req.logSessionUpdated(sessionId, sessionData);
+    await req.logSessionUpdated(id, updateData);
 
     res.json({
       success: true,
